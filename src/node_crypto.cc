@@ -45,6 +45,7 @@
     }                                                         \
   } while (0)
 
+// PEM... why called PFX?
 static const char PUBLIC_KEY_PFX[] =  "-----BEGIN PUBLIC KEY-----";
 static const int PUBLIC_KEY_PFX_LEN = sizeof(PUBLIC_KEY_PFX) - 1;
 static const char PUBRSA_KEY_PFX[] =  "-----BEGIN RSA PUBLIC KEY-----";
@@ -498,11 +499,28 @@ int SSL_CTX_get_issuer(SSL_CTX* ctx, X509* cert, X509** issuer) {
   return ret;
 }
 
+// should not have SSL_ prefix... its very confusing
 
+/*
+doc say that extra are added with
+https://www.openssl.org/docs/man1.0.1/ssl/SSL_CTX_add_extra_chain_cert.html
+
+which completes from trusted CA store if no chain is specified
+
+Only one set of extra chain certificates can be specified per SSL_CTX structure.
+Different chains for different certificates (for example if both RSA and DSA
+ certificates are specified by the same server) or different SSL structures
+with the same parent SSL_CTX cannot be specified using this function.
+
+Holy fuck, that's quite the limitation!
+
+This function should be beside its overloaded one, and its provenance
+identified.
+*/
 int SSL_CTX_use_certificate_chain(SSL_CTX* ctx,
-                                  X509* x,
+                                  X509* x, // should be called cert
                                   STACK_OF(X509)* extra_certs,
-                                  X509** cert,
+                                  X509** cert, // should be outCert, outIssuer
                                   X509** issuer) {
   CHECK_EQ(*issuer, nullptr);
   CHECK_EQ(*cert, nullptr);
@@ -571,7 +589,7 @@ int SSL_CTX_use_certificate_chain(SSL_CTX* ctx,
 // possibly followed by a sequence of CA certificates that should be
 // sent to the peer in the Certificate message.
 //
-// Taken from OpenSSL - edited for style.
+// From ssl_rsa.c:OpenSSL SSL_CTX_use_certificate_chain_file - edited for style.
 int SSL_CTX_use_certificate_chain(SSL_CTX* ctx,
                                   BIO* in,
                                   X509** cert,
@@ -620,8 +638,6 @@ int SSL_CTX_use_certificate_chain(SSL_CTX* ctx,
   }
 
   ret = SSL_CTX_use_certificate_chain(ctx, x, extra_certs, cert, issuer);
-  if (!ret)
-    goto done;
 
  done:
   if (extra_certs != nullptr)
@@ -712,6 +728,9 @@ static X509_STORE* NewRootCertStore() {
   for (auto& cert : *root_certs_vector) {
     X509_up_ref(cert);
     X509_STORE_add_cert(store, cert);
+    // The builtin roots aren't advertised to the client with
+    // SSL_CTX_add_client_CA(), is this a regression, intentional, an oversight,
+    // TBD?
   }
 
   return store;
@@ -735,9 +754,17 @@ void SecureContext::AddCACert(const FunctionCallbackInfo<Value>& args) {
     return;
   }
 
+  // If the existing store is root_cert_store (i.e. the global root store)
+  // then it'll be replaced with a local copy of the same root store, so that
+  // the global root store is not modified for all its user.  However, if the
+  // cert store has not been set to be the root store (by calling
+  // AddRootCerts) then this function will simple add the CA cert to
+  // the current store. Note that by default, each SSL_CTX has its own unique
+  // empty store if AddRootCerts() has not been called.
   X509_STORE* cert_store = SSL_CTX_get_cert_store(sc->ctx_);
   while (X509* x509 =
              PEM_read_bio_X509(bio, nullptr, CryptoPemCallback, nullptr)) {
+    // Do this in the loop so that if no certs are added, no new store is newed.
     if (cert_store == root_cert_store) {
       cert_store = NewRootCertStore();
       SSL_CTX_set_cert_store(sc->ctx_, cert_store);
