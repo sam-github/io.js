@@ -161,8 +161,7 @@ static bool throw_deprecation = false;
 static bool trace_sync_io = false;
 static bool track_heap_objects = false;
 static const char* eval_string = nullptr;
-static unsigned int preload_module_count = 0;
-static const char** preload_modules = nullptr;
+static std::vector<std::string> preload_modules;
 static const int v8_default_thread_pool_size = 4;
 static int v8_thread_pool_size = v8_default_thread_pool_size;
 static bool prof_process = false;
@@ -3266,21 +3265,18 @@ void SetupProcessObject(Environment* env,
     READONLY_PROPERTY(process, "_forceRepl", True(env->isolate()));
   }
 
-  if (preload_module_count) {
-    CHECK(preload_modules);
+  if (!preload_modules.empty()) {
     Local<Array> array = Array::New(env->isolate());
-    for (unsigned int i = 0; i < preload_module_count; ++i) {
+    for (unsigned int i = 0; i < preload_modules.size(); ++i) {
       Local<String> module = String::NewFromUtf8(env->isolate(),
-                                                 preload_modules[i]);
+                                                 preload_modules[i].c_str());
       array->Set(i, module);
     }
     READONLY_PROPERTY(process,
                       "_preload_modules",
                       array);
 
-    delete[] preload_modules;
-    preload_modules = nullptr;
-    preload_module_count = 0;
+    preload_modules.clear();
   }
 
   // --no-deprecation
@@ -3615,6 +3611,15 @@ static void PrintHelp() {
 }
 
 
+static void DisallowInNodeopts(const char* exe, bool is_nodeopt,
+                               const char* arg) {
+  if (is_nodeopt) {
+    fprintf(stderr, "%s: %s is not allowed in NODEOPT\n", exe, arg);
+    exit(9);
+  }
+}
+
+
 // Parse command line arguments.
 //
 // argv is modified in place. exec_argv and v8_argv are out arguments that
@@ -3631,18 +3636,17 @@ static void ParseArgs(int* argc,
                       int* exec_argc,
                       const char*** exec_argv,
                       int* v8_argc,
-                      const char*** v8_argv) {
+                      const char*** v8_argv,
+                      bool is_nodeopt) {
   const unsigned int nargs = static_cast<unsigned int>(*argc);
   const char** new_exec_argv = new const char*[nargs];
   const char** new_v8_argv = new const char*[nargs];
   const char** new_argv = new const char*[nargs];
-  const char** local_preload_modules = new const char*[nargs];
 
   for (unsigned int i = 0; i < nargs; ++i) {
     new_exec_argv[i] = nullptr;
     new_v8_argv[i] = nullptr;
     new_argv[i] = nullptr;
-    local_preload_modules[i] = nullptr;
   }
 
   // exec_argv starts with the first option, the other two start with argv[0].
@@ -3661,9 +3665,11 @@ static void ParseArgs(int* argc,
     if (debug_options.ParseOption(arg)) {
       // Done, consumed by DebugOptions::ParseOption().
     } else if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       printf("%s\n", NODE_VERSION);
       exit(0);
     } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       PrintHelp();
       exit(0);
     } else if (strcmp(arg, "--eval") == 0 ||
@@ -3671,6 +3677,7 @@ static void ParseArgs(int* argc,
                strcmp(arg, "--print") == 0 ||
                strcmp(arg, "-pe") == 0 ||
                strcmp(arg, "-p") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       bool is_eval = strchr(arg, 'e') != nullptr;
       bool is_print = strchr(arg, 'p') != nullptr;
       print_eval = print_eval || is_print;
@@ -3700,10 +3707,12 @@ static void ParseArgs(int* argc,
         exit(9);
       }
       args_consumed += 1;
-      local_preload_modules[preload_module_count++] = module;
+      preload_modules.push_back(module);
     } else if (strcmp(arg, "--check") == 0 || strcmp(arg, "-c") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       syntax_check_only = true;
     } else if (strcmp(arg, "--interactive") == 0 || strcmp(arg, "-i") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       force_repl = true;
     } else if (strcmp(arg, "--no-deprecation") == 0) {
       no_deprecation = true;
@@ -3720,6 +3729,10 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--trace-events-enabled") == 0) {
       trace_enabled = true;
     } else if (strcmp(arg, "--trace-event-categories") == 0) {
+      // XXX(sam) change trace_enabled_categories to std:string so it manages
+      // its own memory, instead of assuming it always exists, which it will not
+      // when it was parsed from NODEOPT.
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       const char* categories = argv[index + 1];
       if (categories == nullptr) {
         fprintf(stderr, "%s: %s requires an argument\n", argv[0], arg);
@@ -3742,12 +3755,18 @@ static void ParseArgs(int* argc,
     } else if (strcmp(arg, "--zero-fill-buffers") == 0) {
       zero_fill_all_buffers = true;
     } else if (strcmp(arg, "--v8-options") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       new_v8_argv[new_v8_argc] = "--help";
       new_v8_argc += 1;
     } else if (strncmp(arg, "--v8-pool-size=", 15) == 0) {
       v8_thread_pool_size = atoi(arg + 15);
 #if HAVE_OPENSSL
     } else if (strncmp(arg, "--tls-cipher-list=", 18) == 0) {
+      // Disallow until there is demand due to discomfort with the security
+      // implications.
+      // XXX(sam) make default_cipher_list a std::string so it manages its own
+      // memory, required it allowed for NODEOPT, and generally a good idea.
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       default_cipher_list = arg + 18;
     } else if (strncmp(arg, "--use-openssl-ca", 16) == 0) {
       ssl_openssl_cert_store = true;
@@ -3768,8 +3787,16 @@ static void ParseArgs(int* argc,
 #endif
     } else if (strcmp(arg, "--expose-internals") == 0 ||
                strcmp(arg, "--expose_internals") == 0) {
-      // consumed in js
+      // Disallow in NODEOPT because it doesn't work. The option is implemented
+      // not during options parsing, but by after-the-fact examination of
+      // process.execArgv.  Since the NODEOPT options don't get placed into
+      // execArgv, NODEOPT can't be used to specify this option.
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
+      // TODO(sam) re-implement expose-internals by setting a global flag which
+      // would be checked by node.js, instead of running a regex over
+      // process.execArgv.
     } else if (strcmp(arg, "--") == 0) {
+      DisallowInNodeopts(argv[0], is_nodeopt, arg);
       index += 1;
       break;
     } else {
@@ -3788,6 +3815,13 @@ static void ParseArgs(int* argc,
 
   // Copy remaining arguments.
   const unsigned int args_left = nargs - index;
+
+  if (is_nodeopt && args_left) {
+    fprintf(stderr, "%s: non-option '%s' is not allowed in NODEOPT\n",
+            argv[0], argv[index]);
+    exit(9);
+  }
+
   memcpy(new_argv + new_argc, argv + index, args_left * sizeof(*argv));
   new_argc += args_left;
 
@@ -3800,16 +3834,6 @@ static void ParseArgs(int* argc,
   memcpy(argv, new_argv, new_argc * sizeof(*argv));
   delete[] new_argv;
   *argc = static_cast<int>(new_argc);
-
-  // Copy the preload_modules from the local array to an appropriately sized
-  // global array.
-  if (preload_module_count > 0) {
-    CHECK(!preload_modules);
-    preload_modules = new const char*[preload_module_count];
-    memcpy(preload_modules, local_preload_modules,
-           preload_module_count * sizeof(*preload_modules));
-  }
-  delete[] local_preload_modules;
 }
 
 
@@ -4231,6 +4255,67 @@ inline void PlatformInit() {
 }
 
 
+void dumpArgs(const char* tag, const char** argv) {
+#if 0
+  fprintf(stderr, "%s:\n", tag);
+  for (int i = 0; argv[i]; i++) {
+    fprintf(stderr, "%d: %s\n", i, argv[i]);
+  }
+#endif
+}
+
+void ProcessArgv(int* argc,
+          const char** argv,
+          int* exec_argc,
+          const char*** exec_argv,
+          bool is_nodeopt = false) {
+  // Parse a few arguments which are specific to Node.
+  int v8_argc;
+  const char** v8_argv;
+  dumpArgs("before parse: argv", argv);
+  ParseArgs(argc, argv, exec_argc, exec_argv, &v8_argc, &v8_argv, is_nodeopt);
+  dumpArgs("after parse: argv", argv);
+  dumpArgs("  v8", v8_argv);
+  dumpArgs("exec", *exec_argv);
+
+  // TODO(bnoordhuis) Intercept --prof arguments and start the CPU profiler
+  // manually?  That would give us a little more control over its runtime
+  // behavior but it could also interfere with the user's intentions in ways
+  // we fail to anticipate.  Dillema.
+  for (int i = 1; i < v8_argc; ++i) {
+    if (strncmp(v8_argv[i], "--prof", sizeof("--prof") - 1) == 0) {
+      v8_is_profiling = true;
+      break;
+    }
+  }
+
+#ifdef __POSIX__
+  // Block SIGPROF signals when sleeping in epoll_wait/kevent/etc.  Avoids the
+  // performance penalty of frequent EINTR wakeups when the profiler is running.
+  // Only do this for v8.log profiling, as it breaks v8::CpuProfiler users.
+  if (v8_is_profiling) {
+    uv_loop_configure(uv_default_loop(), UV_LOOP_BLOCK_SIGNAL, SIGPROF);
+  }
+#endif
+
+  // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
+  // the argv array or the elements it points to.
+  if (v8_argc > 1)
+    V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
+
+  // Anything that's still in v8_argv is not a V8 or a node option.
+  for (int i = 1; i < v8_argc; i++) {
+    fprintf(stderr, "%s: bad option: %s\n", argv[0], v8_argv[i]);
+  }
+  delete[] v8_argv;
+  v8_argv = nullptr;
+
+  if (v8_argc > 1) {
+    exit(9);
+  }
+}
+
+
 void Init(int* argc,
           const char** argv,
           int* exec_argc,
@@ -4278,30 +4363,36 @@ void Init(int* argc,
     SafeGetenv("OPENSSL_CONF", &openssl_config);
 #endif
 
-  // Parse a few arguments which are specific to Node.
-  int v8_argc;
-  const char** v8_argv;
-  ParseArgs(argc, argv, exec_argc, exec_argv, &v8_argc, &v8_argv);
-
-  // TODO(bnoordhuis) Intercept --prof arguments and start the CPU profiler
-  // manually?  That would give us a little more control over its runtime
-  // behavior but it could also interfere with the user's intentions in ways
-  // we fail to anticipate.  Dillema.
-  for (int i = 1; i < v8_argc; ++i) {
-    if (strncmp(v8_argv[i], "--prof", sizeof("--prof") - 1) == 0) {
-      v8_is_profiling = true;
-      break;
+  std::string nodeopt;
+  if (SafeGetenv("NODEOPT", &nodeopt)) {
+    const char** argv_from_env = new const char*[(nodeopt.length()+1) / 2];
+    int argc_from_env = 0;
+    char* cstr = strdup(nodeopt.c_str());
+    // [0] is expected to be the program name, fill it in from the real argv.
+    argv_from_env[argc_from_env++] = argv[0];
+    // XXX(sam) can I use strtok or strtok_r?
+    while (*cstr) {
+      while (isblank(*cstr))
+        cstr++;
+      if (!*cstr)
+        break;
+      argv_from_env[argc_from_env++] = cstr;
+      while (*cstr && !isblank(*cstr))
+        cstr++;
+      if (!*cstr)
+        break;
+      *cstr++ = '\0';
     }
+    argv_from_env[argc_from_env] = nullptr;
+    int exec_argc_;
+    const char** exec_argv_ = nullptr;
+    ProcessArgv(&argc_from_env, argv_from_env, &exec_argc_, &exec_argv_, true);
+    delete[] exec_argv_;
+    delete[] argv_from_env;
+    free(cstr);
   }
 
-#ifdef __POSIX__
-  // Block SIGPROF signals when sleeping in epoll_wait/kevent/etc.  Avoids the
-  // performance penalty of frequent EINTR wakeups when the profiler is running.
-  // Only do this for v8.log profiling, as it breaks v8::CpuProfiler users.
-  if (v8_is_profiling) {
-    uv_loop_configure(uv_default_loop(), UV_LOOP_BLOCK_SIGNAL, SIGPROF);
-  }
-#endif
+  ProcessArgv(argc, argv, exec_argc, exec_argv);
 
 #if defined(NODE_HAVE_I18N_SUPPORT)
   // If the parameter isn't given, use the env variable.
@@ -4314,21 +4405,6 @@ void Init(int* argc,
                      "(check NODE_ICU_DATA or --icu-data-dir parameters)");
   }
 #endif
-  // The const_cast doesn't violate conceptual const-ness.  V8 doesn't modify
-  // the argv array or the elements it points to.
-  if (v8_argc > 1)
-    V8::SetFlagsFromCommandLine(&v8_argc, const_cast<char**>(v8_argv), true);
-
-  // Anything that's still in v8_argv is not a V8 or a node option.
-  for (int i = 1; i < v8_argc; i++) {
-    fprintf(stderr, "%s: bad option: %s\n", argv[0], v8_argv[i]);
-  }
-  delete[] v8_argv;
-  v8_argv = nullptr;
-
-  if (v8_argc > 1) {
-    exit(9);
-  }
 
   // Unconditionally force typed arrays to allocate outside the v8 heap. This
   // is to prevent memory pointers from being moved around that are returned by
