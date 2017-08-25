@@ -1,0 +1,10 @@
+const assert = require('assert')
+function nop(err) {assert.ifError(err)}
+require('dns').lookup('example.com', nop)
+require('crypto').randomBytes(5, nop)
+require('crypto').pbkdf2('pass', 'salt', 102400, 20, 'sha512', nop)
+require('crypto').pbkdf2('pass', 'salt', 102400, 20, 'sha512', nop)
+require('crypto').pbkdf2('pass', 'salt', 102400, 20, 'sha512', nop)
+require('crypto').pbkdf2('pass', 'salt', 102400, 20, 'sha512', nop)
+require('crypto').pbkdf2('pass', 'salt', 102400, 20, 'sha512', nop)
+require('crypto').pbkdf2('pass', 'salt', 102400, 20, 'sha512', nop)

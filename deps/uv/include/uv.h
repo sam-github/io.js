@@ -978,6 +978,14 @@ UV_EXTERN int uv_queue_work(uv_loop_t* loop,
 
 UV_EXTERN int uv_cancel(uv_req_t* req);
 
+typedef void (*uv_queue_submit)(int queued, int idle, void* data);
+typedef void (*uv_queue_start)(int queued, int idle, void* data);
+typedef void (*uv_queue_done)(int queued, int idle, void* data);
+
+UV_EXTERN void uv_queue_stats(uv_queue_submit submit_cb,
+                              uv_queue_start start_cb,
+                              uv_queue_done done_cb,
+                              void* data);
 
 struct uv_cpu_info_s {
   char* model;

@@ -27,6 +27,10 @@
 
 #include <stdlib.h>
 
+#include <sys/types.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
 #define MAX_THREADPOOL_SIZE 128
 
 static uv_once_t once = UV_ONCE_INIT;
@@ -38,11 +42,42 @@ static uv_thread_t* threads;
 static uv_thread_t default_threads[4];
 static QUEUE exit_message;
 static QUEUE wq;
+static int wq_length;
 static volatile int initialized;
+static uv_queue_submit submit_cb;
+static uv_queue_start start_cb;
+static uv_queue_done done_cb;
+static void* cb_data;
 
 
 static void uv__cancelled(struct uv__work* w) {
   abort();
+}
+
+
+static void mark(void (*cb)(int, int, void*)) {
+  int length_;
+  int threads_;
+
+  uv_mutex_lock(&mutex);
+  length_ = wq_length;
+  threads_ = nthreads;
+  uv_mutex_unlock(&mutex);
+
+  cb(length_, threads_, cb_data);
+}
+
+
+void uv_queue_stats(uv_queue_submit submit_cb_,
+                      uv_queue_start start_cb_,
+                      uv_queue_done done_cb_,
+                      void* data) {
+  uv_mutex_lock(&mutex);
+  submit_cb = submit_cb_;
+  start_cb = start_cb_;
+  done_cb = done_cb_;
+  cb_data = data;
+  uv_mutex_unlock(&mutex);
 }
 
 
@@ -72,12 +107,15 @@ static void worker(void* arg) {
       QUEUE_REMOVE(q);
       QUEUE_INIT(q);  /* Signal uv_cancel() that the work req is
                              executing. */
+      wq_length--;
     }
 
     uv_mutex_unlock(&mutex);
 
     if (q == &exit_message)
       break;
+
+    if (start_cb) mark(start_cb);
 
     w = QUEUE_DATA(q, struct uv__work, wq);
     w->work(w);
@@ -93,8 +131,10 @@ static void worker(void* arg) {
 
 
 static void post(QUEUE* q) {
+  if (submit_cb) mark(submit_cb);
   uv_mutex_lock(&mutex);
   QUEUE_INSERT_TAIL(&wq, q);
+  wq_length++;
   if (idle_threads > 0)
     uv_cond_signal(&cond);
   uv_mutex_unlock(&mutex);
@@ -204,9 +244,16 @@ static int uv__work_cancel(uv_loop_t* loop, uv_req_t* req, struct uv__work* w) {
   uv_mutex_lock(&mutex);
   uv_mutex_lock(&w->loop->wq_mutex);
 
+  /* Check for core cancellable state, where states are:
+   * 1. On global wq, work is a fn: waiting for execution, can be cancelled.
+   * 2. Not on a wq, work is a fn: currently executing so uncancellable.
+   * 3. On loop wq, work is NULL: already executed so uncancellable.
+   */
   cancelled = !QUEUE_EMPTY(&w->wq) && w->work != NULL;
-  if (cancelled)
+  if (cancelled) {
+    wq_length--;
     QUEUE_REMOVE(&w->wq);
+  }
 
   uv_mutex_unlock(&w->loop->wq_mutex);
   uv_mutex_unlock(&mutex);
@@ -244,6 +291,7 @@ void uv__work_done(uv_async_t* handle) {
     err = (w->work == uv__cancelled) ? UV_ECANCELED : 0;
     w->done(w, err);
   }
+  if (done_cb) mark(done_cb);
 }
 
 
