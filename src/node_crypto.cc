@@ -212,7 +212,7 @@ static int NoPasswordCallback(char* buf, int size, int rwflag, void* u) {
 
 
 struct CryptoErrorVector : public std::vector<std::string> {
-  inline void Capture() {
+  inline CryptoErrorVector& Capture() {
     clear();
     while (auto err = ERR_get_error()) {
       char buf[256];
@@ -220,37 +220,46 @@ struct CryptoErrorVector : public std::vector<std::string> {
       push_back(buf);
     }
     std::reverse(begin(), end());
+    return *this;
+  }
+
+  inline Local<Value> ToException(Environment* env, const char* message) const {
+    CHECK_NE(message, nullptr);
+    auto message_string =
+      String::NewFromUtf8(env->isolate(), message, NewStringType::kNormal)
+      .ToLocalChecked();
+    return ToException(env, message_string);
   }
 
   inline Local<Value> ToException(
       Environment* env,
-      Local<String> exception_string = Local<String>()) const {
-    if (exception_string.IsEmpty()) {
+      Local<String> message_string = Local<String>()) const {
+    if (message_string.IsEmpty()) {
       CryptoErrorVector copy(*this);
       if (copy.empty()) copy.push_back("no error");  // But possibly a bug...
       // Use last element as the error message, everything else goes
       // into the .opensslErrorStack property on the exception object.
-      auto exception_string =
+      auto message_string =
           String::NewFromUtf8(env->isolate(), copy.back().data(),
                               NewStringType::kNormal, copy.back().size())
           .ToLocalChecked();
       copy.pop_back();
-      return copy.ToException(env, exception_string);
+      return copy.ToException(env, message_string);
     }
 
-    Local<Value> exception_v = Exception::Error(exception_string);
-    CHECK(!exception_v.IsEmpty());
+    Local<Value> error_value = Exception::Error(message_string);
+    CHECK(!error_value.IsEmpty());
 
     if (!empty()) {
-      CHECK(exception_v->IsObject());
-      Local<Object> exception = exception_v.As<Object>();
+      CHECK(error_value->IsObject());
+      Local<Object> exception = error_value.As<Object>();
       exception->Set(env->context(),
                      env->openssl_error_stack(),
                      ToV8Value(env->context(), *this).ToLocalChecked())
           .FromJust();
     }
 
-    return exception_v;
+    return error_value;
   }
 };
 
@@ -259,18 +268,17 @@ void ThrowCryptoError(Environment* env,
                       unsigned long err,  // NOLINT(runtime/int)
                       const char* message = nullptr) {
   char message_buffer[128] = {0};
+
+  // Seems strange:
+  //   if err != 0, we will ignore message?
+  //   if err == 0 and message == nullptr, we will get the err string for 0?
   if (err != 0 || message == nullptr) {
     ERR_error_string_n(err, message_buffer, sizeof(message_buffer));
     message = message_buffer;
   }
   HandleScope scope(env->isolate());
-  auto exception_string =
-      String::NewFromUtf8(env->isolate(), message, NewStringType::kNormal)
-      .ToLocalChecked();
-  CryptoErrorVector errors;
-  errors.Capture();
-  auto exception = errors.ToException(env, exception_string);
-  env->isolate()->ThrowException(exception);
+  env->isolate()->ThrowException(
+      CryptoErrorVector().Capture().ToException(env, message));
 }
 
 
