@@ -1155,7 +1155,7 @@ void SecureContext::SetSessionIdContext(
     message = FIXED_ONE_BYTE_STRING(args.GetIsolate(),
                                     "SSL_CTX_set_session_id_context error");
   } else {
-    ERR_print_errors(bio.get());
+    ERR_print_errors(bio.get());  // Should do as TLSWrap::GetSSLError()
     BIO_get_mem_ptr(bio.get(), &mem);
     message = OneByteString(args.GetIsolate(), mem->data, mem->length);
   }

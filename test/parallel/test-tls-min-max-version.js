@@ -10,7 +10,6 @@ const {
 const DEFAULT_MIN_VERSION = tls.DEFAULT_MIN_VERSION;
 const DEFAULT_MAX_VERSION = tls.DEFAULT_MAX_VERSION;
 
-
 function test(cmin, cmax, cprot, smin, smax, sprot, proto, cerr, serr) {
   assert(proto || cerr || serr, 'test missing any expectations');
   // Report where test was called from. Strip leading garbage from
