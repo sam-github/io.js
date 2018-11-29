@@ -424,21 +424,43 @@ added: v4.0.0
 Specify an alternative default TLS cipher list. Requires Node.js to be built
 with crypto support (default).
 
-### `--tls-v1.0`
+### `--tls-min-v1.0`
 <!-- YAML
 added: REPLACEME
 -->
 
-Enable TLSv1.0 and greater in default [secureProtocol][]. Use for compatibility
-with old TLS clients or servers.
+Set default [minVersion][] to 'TLSv1'. Use for compatibility with old TLS
+clients or servers.
 
-### `--tls-v1.1`
+### `--tls-min-v1.1`
 <!-- YAML
 added: REPLACEME
 -->
 
-Enable TLSv1.1 and greater in default [secureProtocol][]. Use for compatibility
-with old TLS clients or servers.
+Set default [minVersion][] to 'TLSv1.1'. Use for compatibility with old TLS
+clients or servers.
+
+### `--tls-min-v1.3`
+<!-- YAML
+added: REPLACEME
+-->
+
+Set default [minVersion][] to 'TLSv1.3'. Use to disable support for TLSv1.2 in
+favour of TLSv1.3, which is more secure.
+
+### `--tls-max-v1.2`
+<!-- YAML
+added: REPLACEME
+-->
+
+Set default [maxVersion][] to 'TLSv1.2'. Use to disable support for TLSv1.3.
+
+### `--tls-max-v1.3`
+<!-- YAML
+added: REPLACEME
+-->
+
+Set default [maxVersion][] to 'TLSv1.3'. Use to enable support for TLSv1.3.
 
 ### `--trace-deprecation`
 <!-- YAML
@@ -882,4 +904,5 @@ greater than `4` (its current default value). For more information, see the
 [experimental ECMAScript Module]: esm.html#esm_loader_hooks
 [libuv threadpool documentation]: http://docs.libuv.org/en/latest/threadpool.html
 [remote code execution]: https://www.owasp.org/index.php/Code_Injection
-[secureProtocol]: tls.html#tls_tls_createsecurecontext_options
+[minVersion]: tls.html#tls_tls_createsecurecontext_options
+[maxVersion]: tls.html#tls_tls_createsecurecontext_options

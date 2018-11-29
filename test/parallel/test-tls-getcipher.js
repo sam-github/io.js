@@ -31,7 +31,6 @@ const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
 const cipher_list = ['AES128-SHA256', 'AES256-SHA256'];
-const cipher_version_pattern = /TLS|SSL/;
 const options = {
   key: fixtures.readKey('agent2-key.pem'),
   cert: fixtures.readKey('agent2-cert.pem'),
@@ -50,8 +49,32 @@ server.listen(0, '127.0.0.1', common.mustCall(function() {
   }, common.mustCall(function() {
     const cipher = client.getCipher();
     assert.strictEqual(cipher.name, cipher_list[0]);
-    assert(cipher_version_pattern.test(cipher.version));
+    assert.strictEqual(cipher.version, 'TLSv1/SSLv3');
     client.end();
     server.close();
+  }));
+}));
+
+tls.createServer({
+  key: fixtures.readKey('agent2-key.pem'),
+  cert: fixtures.readKey('agent2-cert.pem'),
+  ciphers: 'TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_CCM_8_SHA256',
+  maxVersion: 'TLSv1.3',
+}, common.mustCall(function() {
+  this.close();
+})).listen(0, common.mustCall(function() {
+  const client = tls.connect({
+    port: this.address().port,
+    ciphers: 'TLS_AES_128_CCM_8_SHA256',
+    maxVersion: 'TLSv1.3',
+    rejectUnauthorized: false
+  }, common.mustCall(() => {
+    const cipher = client.getCipher();
+    assert.strictEqual(cipher.name, 'TLS_AES_128_CCM_8_SHA256');
+    // For legacy reasons, version is a hard-coded string with no relationship
+    // to the actual cipher.
+    // See https://github.com/nodejs/node/pull/16130
+    assert.strictEqual(cipher.version, 'TLSv1/SSLv3');
+    client.end();
   }));
 }));
