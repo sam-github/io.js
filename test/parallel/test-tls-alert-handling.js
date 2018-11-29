@@ -40,11 +40,13 @@ const errorHandler = common.mustCall((err) => {
     server.close();
 });
 const server = tls.createServer(opts, common.mustCall(function(s) {
+  console.log('server on secureConnection');
   s.pipe(s);
   s.on('error', errorHandler);
 }, 2));
 
 server.listen(0, common.mustCall(function() {
+  console.log('server on listen');
   sendClient();
 }));
 
@@ -57,6 +59,7 @@ function sendClient() {
     rejectUnauthorized: false
   });
   client.on('data', common.mustCall(function() {
+    console.log('client on data, iter %d', iter+1);
     if (iter++ === 2) sendBADTLSRecord();
     if (iter < max_iter) {
       client.write('a');
@@ -64,9 +67,10 @@ function sendClient() {
     }
     client.end();
   }, max_iter));
-  client.write('a');
+  client.write('a', common.mustCall());
   client.on('error', common.mustNotCall());
   client.on('close', common.mustCall(function() {
+    console.log('client on close');
     clientClosed = true;
     if (canCloseServer())
       server.close();
