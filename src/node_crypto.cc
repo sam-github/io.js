@@ -18,7 +18,8 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
-
+#undef V8_IMMINENT_DEPRECATION_WARNINGS
+#undef V8_DEPRECATION_WARNINGS
 #include "node.h"
 #include "node_buffer.h"
 #include "node_errors.h"
@@ -401,6 +402,50 @@ void SecureContext::New(const FunctionCallbackInfo<Value>& args) {
   new SecureContext(env, args.This());
 }
 
+const char* b(bool _) { return _ ? "true" : "false"; }
+
+void Scratch(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  Isolate* i = env->isolate();
+  Local<Context> c = env->context();
+  // or Local<Context> c = i->GetCurrentContext();
+
+  Local<Value> lv = args[0];
+  bool die = args[1].As<Boolean>()->Value();
+
+  if (die)
+    env->ThrowError("as you wish");
+
+  printf("IsUndefined()? %s\n", b(lv->IsUndefined()));
+  printf("IsNumber()? %s\n", b(lv->IsNumber()));
+  printf("IsInt32()? %s\n", b(lv->IsInt32()));
+  printf("IsUint32()? %s\n", b(lv->IsUint32()));
+  printf("IsBoolean()? %s\n", b(lv->IsBoolean()));
+  printf("IsFunction()? %s\n", b(lv->IsFunction()));
+  printf("IsString()? %s\n", b(lv->IsString()));
+
+  // XXX how can I make ml.IsEmpty() be true for any ToT() conversions?
+
+  // ToT(context) returns a maybe, ToT(isolate) returns a local, one or the
+  // other will be deprecated, apparently depends on whether it can "fail". What
+  // causes "failure"?
+  { Local<Int32> l = lv.As<Int32>(); int32_t v = l->Value(); printf("as int32_t %d\n", v); }
+  { MaybeLocal<Int32> ml = lv->ToInt32(c); Local<Int32> l = ml.ToLocalChecked(); int32_t v = l->Value(); printf("to int32_t %d\n", v); }
+
+  { Local<Uint32> l = lv.As<Uint32>(); uint32_t v = l->Value(); printf("as uint32_t %u\n", v); }
+  { MaybeLocal<Uint32> ml = lv->ToUint32(c); Local<Uint32> l = ml.ToLocalChecked(); uint32_t v = l->Value(); printf("to uint32_t %u\n", v); }
+
+  { Local<Boolean> l = lv.As<Boolean>(); bool v = l->Value(); printf("as bool %s\n", b(v)); }
+  // ToBoolean "cannot fail" - wtf?
+  { Local<Boolean> l = lv->ToBoolean(i); bool v = l->Value(); printf("to bool %s\n", b(v)); }
+
+  { const node::Utf8Value s(env->isolate(), args[0]); printf("as char* \"%s\"\n", *s); }
+  { MaybeLocal<String> ml = lv->ToString(i); Local<String> l = ml.ToLocalChecked();
+      char v[123]; l->WriteUtf8(i, v, sizeof(v)); printf("to char* \"%s\"\n", v); }
+
+  int len = args.Length();
+  args.GetReturnValue().Set(len);
+}
 
 void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
@@ -5812,6 +5857,7 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(target, PK_FORMAT_DER);
   NODE_DEFINE_CONSTANT(target, PK_FORMAT_PEM);
   env->SetMethod(target, "randomBytes", RandomBytes);
+  env->SetMethod(target, "scratch", Scratch);
   env->SetMethodNoSideEffect(target, "timingSafeEqual", TimingSafeEqual);
   env->SetMethodNoSideEffect(target, "getSSLCiphers", GetSSLCiphers);
   env->SetMethodNoSideEffect(target, "getCiphers", GetCiphers);
