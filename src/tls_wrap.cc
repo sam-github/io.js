@@ -398,37 +398,8 @@ Local<Value> TLSWrap::GetSSLError(int status, int* err, std::string* msg) {
         Local<String> message =
             OneByteString(isolate, mem->data, mem->length);
         Local<Value> exception = Exception::Error(message);
-        Local<Object> obj = exception->ToObject(context).ToLocalChecked();
 
-        const char* ls = ERR_lib_error_string(ssl_err);
-        const char* fs = ERR_func_error_string(ssl_err);
-        const char* rs = ERR_reason_error_string(ssl_err);
-
-        if (ls != nullptr)
-          obj->Set(context, env()->library_string(),
-                   OneByteString(isolate, ls)).FromJust();
-        if (fs != nullptr)
-          obj->Set(context, env()->function_string(),
-                   OneByteString(isolate, fs)).FromJust();
-        if (rs != nullptr) {
-          obj->Set(context, env()->reason_string(),
-                   OneByteString(isolate, rs)).FromJust();
-
-          // SSL has no API to recover the error name from the number, so we
-          // transform reason strings like "this error" to "ERR_SSL_THIS_ERROR",
-          // which ends up being close to the original error macro name.
-          std::string code(rs);
-
-          for (auto& c : code) {
-            if (c == ' ')
-              c = '_';
-            else
-              c = ::toupper(c);
-          }
-          obj->Set(context, env()->code_string(),
-                   OneByteString(isolate, ("ERR_SSL_" + code).c_str()))
-                     .FromJust();
-        }
+        crypto::error::Decorate(env(), exception, e);
 
         if (msg != nullptr)
           msg->assign(mem->data, mem->data + mem->length);

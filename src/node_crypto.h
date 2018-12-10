@@ -71,6 +71,16 @@ struct MarkPopErrorOnReturn {
   ~MarkPopErrorOnReturn() { ERR_pop_to_mark(); }
 };
 
+namespace error {
+using v8::Local;
+using v8::Value;
+using v8::Object;
+using node::Environment;
+
+Local<Object> Decorate(Environment* env, Local<Object> obj, unsigned long err);
+Local<Value> Decorate(Environment* env, Local<Value> val, unsigned long err);
+}
+
 // Define smart pointers for the most commonly used OpenSSL types:
 using X509Pointer = DeleteFnPtr<X509, X509_free>;
 using BIOPointer = DeleteFnPtr<BIO, BIO_free_all>;

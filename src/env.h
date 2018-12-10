@@ -269,6 +269,8 @@ constexpr size_t kFsStatsBufferLength = kFsStatsFieldsNumber * 2;
   V(read_host_object_string, "_readHostObject")                                \
   V(readable_string, "readable")                                               \
   V(reason_string, "reason")                                                   \
+  V(reason_string, "reason")                                                   \
+  V(reason_string, "reason")                                                   \
   V(refresh_string, "refresh")                                                 \
   V(regexp_string, "regexp")                                                   \
   V(rename_string, "rename")                                                   \

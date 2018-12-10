@@ -30,7 +30,9 @@ const testCases = [
       port: undefined,
       rejectUnauthorized: true
     },
-    errorCode: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY'
+    errorCode: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    reason: 'unable to get local issuer certificate',
+    message: 'unable to get local issuer certificate',
   }
 ];
 
@@ -46,6 +48,8 @@ function runTest(tindex) {
     const client = tls.connect(tcase.clientOpts);
     client.on('error', common.mustCall((e) => {
       assert.strictEqual(e.code, tcase.errorCode);
+      assert.strictEqual(e.reason, tcase.reason);
+      assert.strictEqual(e.message, tcase.message);
       server.close(common.mustCall(() => {
         runTest(tindex + 1);
       }));

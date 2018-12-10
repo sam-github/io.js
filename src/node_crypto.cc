@@ -55,6 +55,7 @@ namespace node {
 namespace crypto {
 
 using node::THROW_ERR_TLS_INVALID_PROTOCOL_METHOD;
+using error::Decorate;
 
 using v8::Array;
 using v8::ArrayBufferView;
@@ -273,12 +274,16 @@ void ThrowCryptoError(Environment* env,
   //   if err != 0, we will ignore message?
   //   if err == 0 and message == nullptr, we will get the err string for 0?
   if (err != 0 || message == nullptr) {
+    // The traditional "error:XXXX:lib:func:reason" style error message.
     ERR_error_string_n(err, message_buffer, sizeof(message_buffer));
     message = message_buffer;
   }
   HandleScope scope(env->isolate());
+  printf("message %s\n", message);
   env->isolate()->ThrowException(
-      CryptoErrorVector().Capture().ToException(env, message));
+      Decorate(env,
+               CryptoErrorVector().Capture().ToException(env, message),
+               err));
 }
 
 
@@ -1266,11 +1271,99 @@ void SecureContext::LoadPKCS12(const FunctionCallbackInfo<Value>& args) {
 
   if (!ret) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
-    const char* str = ERR_reason_error_string(err);
-    return env->ThrowError(str);
+    const char* message = ERR_reason_error_string(err);
+    ThrowCryptoError(env, err, message);
   }
 }
 
+
+namespace error {
+Local<Value> Decorate(Environment* env, Local<Value> value, unsigned long err) {
+  auto obj = value->ToObject(env->isolate()->GetCurrentContext())
+    .ToLocalChecked();
+  Decorate(env, obj, err);
+  return value;
+}
+
+
+Local<Object> Decorate(Environment* env, Local<Object> obj, unsigned long err) {
+  if (err == 0) return obj;  // No decoration required.
+
+  const char* ls = ERR_lib_error_string(err);
+  const char* fs = ERR_func_error_string(err);
+  const char* rs = ERR_reason_error_string(err);
+
+  obj->Set(env->isolate()->GetCurrentContext(),
+      OneByteString(env->isolate(), "library"),
+      OneByteString(env->isolate(), ls ? ls : "")).FromJust();
+  obj->Set(env->isolate()->GetCurrentContext(),
+      OneByteString(env->isolate(), "function"),
+      OneByteString(env->isolate(), fs ? fs : "")).FromJust();
+  obj->Set(env->isolate()->GetCurrentContext(),
+      env->reason_string(),
+      OneByteString(env->isolate(), rs ? rs : "")).FromJust();
+
+  // SSL has no API to recover the error name from the number, so we
+  // transform "this error" to "ERR_SSL_THIS_ERROR", which ends up being
+  // close to the original error name.
+  // XXX(sam) but will this be OK for crypto?
+  std::string code(rs);
+
+  for (auto& c : code) {
+    if (c == ' ')
+      c = '_';
+    else
+      c = ::toupper(c);
+  }
+
+  const char* prefix = "ERR_NONE_";
+  switch(ERR_GET_LIB(err)) {
+    case ERR_LIB_SYS:    prefix = "ERR_SYS_"; break;
+    case ERR_LIB_BN:     prefix = "ERR_BN_"; break;
+    case ERR_LIB_RSA:    prefix = "ERR_RSA_"; break;
+    case ERR_LIB_DH:     prefix = "ERR_DH_"; break;
+    case ERR_LIB_EVP:    prefix = "ERR_EVP_"; break;
+    case ERR_LIB_BUF:    prefix = "ERR_BUF_"; break;
+    case ERR_LIB_OBJ:    prefix = "ERR_OBJ_"; break;
+    case ERR_LIB_PEM:    prefix = "ERR_PEM_"; break;
+    case ERR_LIB_DSA:    prefix = "ERR_DSA_"; break;
+    case ERR_LIB_X509:   prefix = "ERR_X509_"; break;
+    case ERR_LIB_ASN1:   prefix = "ERR_ASN1_"; break;
+    case ERR_LIB_CONF:   prefix = "ERR_CONF_"; break;
+    case ERR_LIB_CRYPTO: prefix = "ERR_CRYPTO_"; break;
+    case ERR_LIB_EC:     prefix = "ERR_EC_"; break;
+    case ERR_LIB_SSL:    prefix = "ERR_SSL_"; break;
+    case ERR_LIB_BIO:    prefix = "ERR_BIO_"; break;
+    case ERR_LIB_PKCS7:  prefix = "ERR_PKCS7_"; break;
+    case ERR_LIB_X509V3: prefix = "ERR_X509V3_"; break;
+    case ERR_LIB_PKCS12: prefix = "ERR_PKCS12_"; break;
+    case ERR_LIB_RAND:   prefix = "ERR_RAND_"; break;
+    case ERR_LIB_DSO:    prefix = "ERR_DSO_"; break;
+    case ERR_LIB_ENGINE: prefix = "ERR_ENGINE_"; break;
+    case ERR_LIB_OCSP:   prefix = "ERR_OCSP_"; break;
+    case ERR_LIB_UI:     prefix = "ERR_UI_"; break;
+    case ERR_LIB_COMP:   prefix = "ERR_COMP_"; break;
+    case ERR_LIB_ECDSA:  prefix = "ERR_ECDSA_"; break;
+    case ERR_LIB_ECDH:   prefix = "ERR_ECDH_"; break;
+    case ERR_LIB_STORE:  prefix = "ERR_STORE_"; break;
+    case ERR_LIB_FIPS:   prefix = "ERR_FIPS_"; break;
+    case ERR_LIB_CMS:    prefix = "ERR_CMS_"; break;
+    case ERR_LIB_TS:     prefix = "ERR_TS_"; break;
+    case ERR_LIB_HMAC:   prefix = "ERR_HMAC_"; break;
+    case ERR_LIB_CT:     prefix = "ERR_CT_"; break;
+    case ERR_LIB_ASYNC:  prefix = "ERR_ASYNC_"; break;
+    case ERR_LIB_KDF:    prefix = "ERR_KDF_"; break;
+    case ERR_LIB_USER:   prefix = "ERR_USER_"; break;
+  }
+
+  obj->Set(env->isolate()->GetCurrentContext(),
+           env->code_string(),
+           OneByteString(env->isolate(), (prefix + code).c_str()))
+    .FromJust();
+
+  return obj;
+}
+}
 
 #ifndef OPENSSL_NO_ENGINE
 // Helper for the smart pointer.
@@ -2435,6 +2528,10 @@ void SSLWrap<Base>::VerifyError(const FunctionCallbackInfo<Value>& args) {
     exception_value->ToObject(isolate->GetCurrentContext()).ToLocalChecked();
   exception_object->Set(w->env()->context(), w->env()->code_string(),
                         OneByteString(isolate, code)).FromJust();
+  exception_object->Set(w->env()->context(), w->env()->reason_string(),
+                        reason_string).FromJust();
+  // This is not an "SSL error", the return codes come from a different set of
+  // values, so they have a reason but no library or function.
   args.GetReturnValue().Set(exception_object);
 }
 
@@ -4366,6 +4463,7 @@ void Hash::New(const FunctionCallbackInfo<Value>& args) {
   if (!hash->HashInit(*hash_type)) {
     return ThrowCryptoError(env, ERR_get_error(),
                             "Digest method not supported");
+    // XXX(sam) should be 'Unknown message digest' like Hmac
   }
 }
 
@@ -4479,7 +4577,7 @@ SignBase::Error SignBase::Update(const char* data, int len) {
 }
 
 
-void SignBase::CheckThrow(SignBase::Error error) {
+void SignBase::CheckThrow(SignBase::Error error) { // called from where?
   HandleScope scope(env()->isolate());
 
   switch (error) {
@@ -5320,6 +5418,7 @@ void ECDH::ComputeSecret(const FunctionCallbackInfo<Value>& args) {
   int r = ECDH_compute_key(
       out.data(), out_len, pub.get(), ecdh->key_.get(), nullptr);
   if (!r)
+    // TODO(@sam-github) use ThrowCryptoError()
     return env->ThrowError("Failed to compute ECDH key");
 
   Local<Object> buf = out.ToBuffer().ToLocalChecked();
@@ -6369,13 +6468,13 @@ void SetEngine(const FunctionCallbackInfo<Value>& args) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
     if (err == 0)
       return args.GetReturnValue().Set(false);
-    return ThrowCryptoError(env, err);
+    return ThrowCryptoError(env, err);  // XXX(sam) Decorate
   }
 
   int r = ENGINE_set_default(engine, flags);
   ENGINE_free(engine);
   if (r == 0)
-    return ThrowCryptoError(env, ERR_get_error());
+    return ThrowCryptoError(env, ERR_get_error());  // XXX(sam) Decorate
 
   args.GetReturnValue().Set(true);
 }
@@ -6396,7 +6495,7 @@ void SetFipsCrypto(const FunctionCallbackInfo<Value>& args) {
     return;  // No action needed.
   if (!FIPS_mode_set(enable)) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
-    return ThrowCryptoError(env, err);
+    return ThrowCryptoError(env, err);  // XXX(sam) Decorate
   }
 }
 #endif /* NODE_FIPS_MODE */
