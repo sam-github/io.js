@@ -33,6 +33,7 @@ const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
 const options = {
+  maxVersion: 'TLSv1.3', // XXX test with v1.2 and v1.3
   key: fixtures.readKey('agent2-key.pem'),
   cert: fixtures.readKey('agent2-cert.pem')
 };
@@ -50,13 +51,19 @@ server.listen(0, function() {
     port: this.address().port,
     rejectUnauthorized: false
   }, () => {
-    console.log('connect1');
+    console.log('connect1', client1.getProtocol());
     assert.ok(!client1.isSessionReused(), 'Session *should not* be reused.');
-    session1 = client1.getSession();
+    // Once data flows, we know there is a session.
+    client1.on('data', () => {
+      session1 = client1.getSession();
+      assert(session1);
+    });
   });
 
   client1.on('close', () => {
     console.log('close1');
+
+    assert(session1);
 
     const opts = {
       port: server.address().port,
@@ -65,8 +72,9 @@ server.listen(0, function() {
     };
 
     const client2 = tls.connect(opts, () => {
-      console.log('connect2');
+      console.log('connect2', client2.getProtocol());
       assert.ok(client2.isSessionReused(), 'Session *should* be reused.');
+      assert(client2.getSession());
     });
 
     client2.on('close', () => {

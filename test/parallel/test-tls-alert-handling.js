@@ -48,12 +48,18 @@ server.listen(0, common.mustCall(function() {
   sendClient();
 }));
 
+server.on('tlsClientError', common.mustNotCall());
+
+server.on('error', common.mustNotCall());
 
 function sendClient() {
   const client = tls.connect(server.address().port, {
     rejectUnauthorized: false
   });
-  client.on('data', common.mustCall(function() {
+  client.enableTrace();
+  client.on('data', common.mustCall(function(d) {
+    console.log('client on data <%j> iter %d', d, iter); // getting tls record as data?
+
     if (iter++ === 2) sendBADTLSRecord();
     if (iter < max_iter) {
       client.write('a');
@@ -78,8 +84,10 @@ function sendBADTLSRecord() {
     socket: socket,
     rejectUnauthorized: false
   }, common.mustCall(function() {
-    socket.write(BAD_RECORD);
-    socket.end();
+    client.write('x');
+    client.on('data', (data) => {
+      socket.end(BAD_RECORD);
+    });
   }));
   client.on('error', common.mustCall((err) => {
     assert.strictEqual(err.code, 'ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION');

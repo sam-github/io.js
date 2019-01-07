@@ -16,6 +16,7 @@ if (process.env.CHILD) {
   const copts = {
     port: process.env.PORT,
     checkServerIdentity: common.mustCall(),
+// XXX fails because called for the extra secureConnect events
   };
   const client = tls.connect(copts, common.mustCall(function() {
     client.end('hi');
@@ -39,7 +40,6 @@ const server = tls.createServer(options, common.mustCall(function(s) {
   });
 
   fork(__filename, { env }).on('exit', common.mustCall(function(status) {
-    // client did not succeed in connecting
     assert.strictEqual(status, 0);
   }));
 }));

@@ -21,7 +21,8 @@ const options = {
 
 const server = tls.createServer(options, common.mustCall((conn) => {
   conn.write('hello');
-  conn.on('data', common.mustCall());
+  conn.on('data', common.mustCall((d) => {console.log('d <%s>', d);}));
+  //conn.on('data', common.mustCall());
   conn.end();
 })).listen(0, common.mustCall(() => {
   const netSocket = new net.Socket({
