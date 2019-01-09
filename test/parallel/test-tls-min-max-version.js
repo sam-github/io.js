@@ -10,6 +10,8 @@ const {
 const DEFAULT_MIN_VERSION = tls.DEFAULT_MIN_VERSION;
 const DEFAULT_MAX_VERSION = tls.DEFAULT_MAX_VERSION;
 
+// XXX for pre-TLSv1.3
+tls.DEFAULT_MAX_VERSION = 'TLSv1.3';
 
 function test(cmin, cmax, cprot, smin, smax, sprot, proto, cerr, serr) {
   assert(proto || cerr || serr, 'test missing any expectations');
@@ -56,8 +58,8 @@ function test(cmin, cmax, cprot, smin, smax, sprot, proto, cerr, serr) {
     assert.ifError(pair.client.err);
     assert(pair.server.conn);
     assert(pair.client.conn);
-    assert.strictEqual(pair.client.conn.getProtocol(), proto);
-    assert.strictEqual(pair.server.conn.getProtocol(), proto);
+      assert.strictEqual(pair.client.conn.getProtocol(), proto);
+      assert.strictEqual(pair.server.conn.getProtocol(), proto);
     return cleanup();
   }));
 }
