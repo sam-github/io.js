@@ -37,6 +37,11 @@ function test(cmin, cmax, cprot, smin, smax, sprot, proto, cerr, serr) {
       console.log('server', pair.server.err ? pair.server.err.code : undefined);
       if (cerr) {
         assert(pair.client.err);
+        // Accept these codes as aliases, the one reported depends on the
+        // OpenSSL version.
+        if (cerr === 'ERR_SSL_UNSUPPORTED_PROTOCOL' &&
+            pair.client.err.code === 'ERR_SSL_VERSION_TOO_LOW')
+          cerr = 'ERR_SSL_VERSION_TOO_LOW';
         assert.strictEqual(pair.client.err.code, cerr);
       }
       if (serr) {
