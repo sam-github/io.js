@@ -1256,6 +1256,7 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
   Environment* env = wrap->env();
 
+  // XXX(sam) Move type and len check to js, and CHECK() in C++.
   if (args.Length() < 1) {
     return THROW_ERR_MISSING_ARGS(env, "Ticket keys argument is mandatory");
   }
@@ -1532,7 +1533,7 @@ int SSLWrap<Base>::NewSessionCallback(SSL* s, SSL_SESSION* sess) {
       reinterpret_cast<const char*>(session_id_data),
       session_id_length).ToLocalChecked();
   Local<Value> argv[] = { session_id, session };
-  w->new_session_wait_ = true;
+  w->waiting_new_session_ = true;
   w->MakeCallback(env->onnewsession_string(), arraysize(argv), argv);
 
   return 0;
@@ -2094,6 +2095,7 @@ void SSLWrap<Base>::LoadSession(const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
 
+  // XXX(sam) check arg length and types in js, and CHECK in c++
   if (args.Length() >= 1 && Buffer::HasInstance(args[0])) {
     ssize_t slen = Buffer::Length(args[0]);
     char* sbuf = Buffer::Data(args[0]);
@@ -2131,6 +2133,7 @@ void SSLWrap<Base>::Renegotiate(const FunctionCallbackInfo<Value>& args) {
 
   ClearErrorOnReturn clear_error_on_return;
 
+  // XXX(sam) Return/throw an error, don't discard the SSL error reason.
   bool yes = SSL_renegotiate(w->ssl_.get()) == 1;
   args.GetReturnValue().Set(yes);
 }
@@ -2164,7 +2167,7 @@ template <class Base>
 void SSLWrap<Base>::NewSessionDone(const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
-  w->new_session_wait_ = false;
+  w->waiting_new_session_ = false;
   w->NewSessionDoneCb();
 }
 

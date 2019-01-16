@@ -210,7 +210,7 @@ class StreamResource {
   // Try to write as much data as possible synchronously, and modify
   // `*bufs` and `*count` accordingly. This is a no-op by default.
   virtual int DoTryWrite(uv_buf_t** bufs, size_t* count);
-  // Perform a write of data, and call req_wrap->Done() when finished.
+  // Perform an async write of data, and call w->Done() when finished.
   virtual int DoWrite(WriteWrap* w,
                       uv_buf_t* bufs,
                       size_t count,
