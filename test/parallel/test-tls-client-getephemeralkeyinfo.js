@@ -13,6 +13,9 @@ const cert = fixtures.readKey('agent2-cert.pem');
 let ntests = 0;
 let nsuccess = 0;
 
+// Also works with TLS1.3, rework test to prove it.
+//   'ECDH' with 'TLS_AES_128_GCM_SHA256',
+
 function loadDHParam(n) {
   return fixtures.readKey(`dh${n}.pem`);
 }
@@ -50,14 +53,15 @@ function test(size, type, name, next) {
     const client = tls.connect({
       port: this.address().port,
       rejectUnauthorized: false
-    }, function() {
+    }, common.mustCall(function() {
       const ekeyinfo = client.getEphemeralKeyInfo();
       assert.strictEqual(ekeyinfo.type, type);
       assert.strictEqual(ekeyinfo.size, size);
       assert.strictEqual(ekeyinfo.name, name);
       nsuccess++;
       server.close();
-    });
+    }));
+    client.on('secureConnect', common.mustCall());
   }));
 }
 

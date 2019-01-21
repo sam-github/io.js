@@ -10,13 +10,17 @@ if (!common.hasCrypto)
 
 const tls = require('tls');
 
+tls.DEFAULT_MAX_VERSION = 'TLSv1.2';
+
 const options = {
+  enableTrace: true,
   key: fixtures.readKey('agent1-key.pem'),
   cert: fixtures.readKey('agent1-cert.pem')
 };
 
 const server = tls.Server(options, common.mustCall((socket) => {
   socket.on('error', common.mustCall((err) => {
+    console.log('server err', err);
     common.expectsError({
       type: Error,
       code: 'ERR_TLS_RENEGOTIATION_DISABLED',
@@ -29,10 +33,12 @@ const server = tls.Server(options, common.mustCall((socket) => {
   // Demonstrates that renegotiation works successfully up until
   // disableRenegotiation is called.
   socket.on('data', common.mustCall((chunk) => {
+    console.log('server disabling renegotiation');
     socket.write(chunk);
     socket.disableRenegotiation();
   }));
   socket.on('secure', common.mustCall(() => {
+    console.log('server on secure', socket._handle.handshakes);
     assert(socket._handle.handshakes < 2,
            `Too many handshakes [${socket._handle.handshakes}]`);
   }));
@@ -52,7 +58,8 @@ server.listen(0, common.mustCall(() => {
       // attempt. This should succeed.
       client.renegotiate(
         { rejectUnauthorized: false },
-        common.mustCall(() => {
+        common.mustCall((err) => {
+          assert.ifError(err);
           // Once renegotiation completes, we write some
           // data to the socket, which triggers the on
           // data event on the server. After that data

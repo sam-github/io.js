@@ -16,6 +16,7 @@ const server = tls.createServer({
   rejectUnauthorized: true
 }, function(c) {
 }).listen(0, common.mustCall(function() {
+// XXX requires error on empty cipher list
   assert.throws(() => {
     tls.connect({
       port: this.address().port,

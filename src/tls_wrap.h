@@ -67,6 +67,8 @@ class TLSWrap : public AsyncWrap,
 
   ShutdownWrap* CreateShutdownWrap(
       v8::Local<v8::Object> req_wrap_object) override;
+
+  // Implement StreamResource:
   int DoShutdown(ShutdownWrap* req_wrap) override;
   int DoWrite(WriteWrap* w,
               uv_buf_t* bufs,
@@ -139,7 +141,7 @@ class TLSWrap : public AsyncWrap,
   AsyncWrap* GetAsyncWrap() override;
   bool IsIPCPipe() override;
 
-  // Resource implementation
+  // Handle reads/writes from the underlying stream.
   void OnStreamAfterWrite(WriteWrap* w, int status) override;
   uv_buf_t OnStreamAlloc(size_t size) override;
   void OnStreamRead(ssize_t nread, const uv_buf_t& buf) override;

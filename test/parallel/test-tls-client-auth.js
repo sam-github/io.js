@@ -64,6 +64,11 @@ connect({
 });
 
 // Request cert from client that doesn't have one.
+/*
+Traditional SSL error, no code:
+[Error: 139842825238336:error:1417C0C7:SSL routines:tls_process_client_certificate:peer did not return a certificate:../deps/openssl/openssl/ssl/statem/statem_srvr.c:3664:
+]
+*/
 connect({
   client: {
     ca: server.ca,
@@ -76,7 +81,7 @@ connect({
     requestCert: true,
   },
 }, function(err, pair, cleanup) {
-  assert.strictEqual(err.code, 'ECONNRESET');
+  assert.strictEqual(err.code, 'ERR_SSL_PEER_DID_NOT_RETURN_A_CERTIFICATE');
   return cleanup();
 });
 
@@ -154,6 +159,15 @@ connect({
 });
 
 // Fail to complete client's chain.
+  /*
+  _tls_wrap.js:624
+    this.alpnProtocol = this._handle.getALPNNegotiatedProtocol();
+                                     ^
+
+    TypeError: Cannot read property 'getALPNNegotiatedProtocol' of null
+      at TLSSocket._finishInit (_tls_wrap.js:624:36)
+      at TLSWrap.onhandshakedone (_tls_wrap.js:103:9)
+*/
 connect({
   client: {
     key: client.key,

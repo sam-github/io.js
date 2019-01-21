@@ -85,7 +85,7 @@ exports.connect = function connect(options, callback) {
     });
   } catch (err) {
     // Invalid options can throw, report the error.
-    pair.server.err = err;
+    server.err = err;
     callback(err, pair, () => {});
   }
 

@@ -31,7 +31,6 @@ connect({
 }, function(err, pair, cleanup) {
   console.log('client', pair.client.err);
   console.log('server', pair.server.err);
-  process.exit(9);
   assert.ifError(err);
   const c = pair.client.conn;
   const s = pair.server.conn;
@@ -39,6 +38,9 @@ connect({
   c.write('farewell');
   s.on('data', common.mustCall((d) => {
     console.log('S: %s', d)
+  }));
+  c.on('data', common.mustCall((d) => {
+    console.log('C: %s', d);
     return cleanup();
   }));
 });

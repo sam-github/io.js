@@ -958,6 +958,8 @@ added: v0.11.8
 * `callback` {Function} A function that will be called when the renegotiation
   request has been completed.
 
+... callback is added as a listener to the 'secure' event
+
 The `tlsSocket.renegotiate()` method initiates a TLS renegotiation process.
 Upon completion, the `callback` function will be passed a single argument
 that is either an `Error` (if the request failed) or `null`.
@@ -967,6 +969,8 @@ connection has been established.
 
 When running as the server, the socket will be destroyed with an error after
 `handshakeTimeout` timeout.
+
+... but only if it doesn't re-handshake, I hope!
 
 ### tlsSocket.setMaxSendFragment(size)
 <!-- YAML

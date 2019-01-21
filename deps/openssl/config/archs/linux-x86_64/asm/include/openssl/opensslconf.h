@@ -79,7 +79,7 @@ extern "C" {
 # define OPENSSL_NO_SCTP
 #endif
 #ifndef OPENSSL_NO_SSL_TRACE
-# define OPENSSL_NO_SSL_TRACE
+// # define OPENSSL_NO_SSL_TRACE
 #endif
 #ifndef OPENSSL_NO_SSL3
 # define OPENSSL_NO_SSL3
