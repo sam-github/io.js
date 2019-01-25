@@ -125,6 +125,8 @@ void TLSWrap::InitSSL() {
   SSL_set_mode(ssl_.get(), mode | SSL_MODE_RELEASE_BUFFERS);
 #endif  // SSL_MODE_RELEASE_BUFFERS
 
+  SSL_clear_mode(ssl_.get(), SSL_MODE_AUTO_RETRY);
+
   SSL_set_app_data(ssl_.get(), this);
   // Using InfoCallback isn't how we are supposed to check handshake progress:
   //   https://github.com/openssl/openssl/issues/7199#issuecomment-420915993
