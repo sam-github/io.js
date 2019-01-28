@@ -1054,6 +1054,8 @@ typedef enum {
 # define SSL_CB_CONNECT_EXIT             (SSL_ST_CONNECT|SSL_CB_EXIT)
 # define SSL_CB_HANDSHAKE_START          0x10
 # define SSL_CB_HANDSHAKE_DONE           0x20
+# define SSL_CB_POST_HANDSHAKE_START     0x40
+# define SSL_CB_POST_HANDSHAKE_DONE      0x80
 
 /* Is the SSL_connection established? */
 # define SSL_in_connect_init(a)          (SSL_in_init(a) && !SSL_is_server(a))
