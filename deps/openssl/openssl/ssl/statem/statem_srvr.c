@@ -4053,10 +4053,10 @@ int tls_construct_new_session_ticket(SSL *s, WPACKET *pkt)
              */
             if (s->sent_tickets != 0) {
                 ossl_statem_set_in_init(s, 0);
-                cb(s, SSL_CB_HANDSHAKE_DONE, 1);
+                cb(s, SSL_CB_POST_HANDSHAKE_DONE, 1);
                 ossl_statem_set_in_init(s, 1);
             }
-            cb(s, SSL_CB_HANDSHAKE_START, 1);
+            cb(s, SSL_CB_POST_HANDSHAKE_START, 1);
         }
         /*
          * If we already sent one NewSessionTicket, or we resumed then
