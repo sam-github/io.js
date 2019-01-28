@@ -2,7 +2,7 @@
  * Copyright 1995-2018 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved
  *
- * Licensed under the OpenSSL license (the "License").  You may not use
+ * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
  * https://www.openssl.org/source/license.html
@@ -396,7 +396,8 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL *s, PACKET *pkt)
 
 #ifdef SSL_DEBUG
     if (SSL_USE_SIGALGS(s))
-        fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
+        fprintf(stderr, "USING TLSv1.2 HASH %s\n",
+                md == NULL ? "n/a" : EVP_MD_name(md));
 #endif
 
     /* Check for broken implementations of GOST ciphersuites */
@@ -439,7 +440,8 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL *s, PACKET *pkt)
     }
 
 #ifdef SSL_DEBUG
-    fprintf(stderr, "Using client verify alg %s\n", EVP_MD_name(md));
+    fprintf(stderr, "Using client verify alg %s\n",
+            md == NULL ? "n/a" : EVP_MD_name(md));
 #endif
     if (EVP_DigestVerifyInit(mctx, &pctx, md, NULL, pkey) <= 0) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_TLS_PROCESS_CERT_VERIFY,
@@ -1028,6 +1030,7 @@ unsigned long ssl3_output_cert_chain(SSL *s, WPACKET *pkt, CERT_PKEY *cpk)
 WORK_STATE tls_finish_handshake(SSL *s, WORK_STATE wst, int clearbufs, int stop)
 {
     void (*cb) (const SSL *ssl, int type, int val) = NULL;
+    int cleanuphand = s->statem.cleanuphand;
 
     if (clearbufs) {
         if (!SSL_IS_DTLS(s)) {
@@ -1054,7 +1057,7 @@ WORK_STATE tls_finish_handshake(SSL *s, WORK_STATE wst, int clearbufs, int stop)
      * Only set if there was a Finished message and this isn't after a TLSv1.3
      * post handshake exchange
      */
-    if (s->statem.cleanuphand) {
+    if (cleanuphand) {
         /* skipped if we just sent a HelloRequest */
         s->renegotiate = 0;
         s->new_session = 0;
@@ -1074,15 +1077,6 @@ WORK_STATE tls_finish_handshake(SSL *s, WORK_STATE wst, int clearbufs, int stop)
             /* N.B. s->ctx may not equal s->session_ctx */
             tsan_counter(&s->ctx->stats.sess_accept_good);
             s->handshake_func = ossl_statem_accept;
-
-            if (SSL_IS_DTLS(s) && !s->hit) {
-                /*
-                 * We are finishing after the client. We start the timer going
-                 * in case there are any retransmits of our final flight
-                 * required.
-                 */
-                dtls1_start_timer(s);
-            }
         } else {
             if (SSL_IS_TLS13(s)) {
                 /*
@@ -1104,15 +1098,6 @@ WORK_STATE tls_finish_handshake(SSL *s, WORK_STATE wst, int clearbufs, int stop)
 
             s->handshake_func = ossl_statem_connect;
             tsan_counter(&s->session_ctx->stats.sess_connect_good);
-
-            if (SSL_IS_DTLS(s) && s->hit) {
-                /*
-                 * We are finishing after the server. We start the timer going
-                 * in case there are any retransmits of our final flight
-                 * required.
-                 */
-                dtls1_start_timer(s);
-            }
         }
 
         if (SSL_IS_DTLS(s)) {
@@ -1132,8 +1117,14 @@ WORK_STATE tls_finish_handshake(SSL *s, WORK_STATE wst, int clearbufs, int stop)
     /* The callback may expect us to not be in init at handshake done */
     ossl_statem_set_in_init(s, 0);
 
-    if (cb != NULL)
-        cb(s, SSL_CB_HANDSHAKE_DONE, 1);
+    if (cb != NULL) {
+        if (!cleanuphand
+                && SSL_IS_TLS13(s)
+                && !SSL_IS_FIRST_HANDSHAKE(s))
+            cb(s, SSL_CB_POST_HANDSHAKE_DONE, 1);
+        else
+            cb(s, SSL_CB_HANDSHAKE_DONE, 1);
+    }
 
     if (!stop) {
         /* If we've got more work to do we go back into init */
@@ -1415,7 +1406,7 @@ typedef struct {
     const SSL_METHOD *(*smeth) (void);
 } version_info;
 
-#if TLS_MAX_VERSION != TLS1_3_VERSION
+#if TLS_MAX_VERSION_INTERNAL != TLS1_3_VERSION
 # error Code needs update for TLS_method() support beyond TLS1_3_VERSION.
 #endif
 
@@ -1449,7 +1440,7 @@ static const version_info tls_version_table[] = {
     {0, NULL, NULL},
 };
 
-#if DTLS_MAX_VERSION != DTLS1_2_VERSION
+#if DTLS_MAX_VERSION_INTERNAL != DTLS1_2_VERSION
 # error Code needs update for DTLS_method() support beyond DTLS1_2_VERSION.
 #endif
 
@@ -1682,12 +1673,12 @@ int ssl_set_version_bound(int method_version, int version, int *bound)
         return 0;
 
     case TLS_ANY_VERSION:
-        if (version < SSL3_VERSION || version > TLS_MAX_VERSION)
+        if (version < SSL3_VERSION || version > TLS_MAX_VERSION_INTERNAL)
             return 0;
         break;
 
     case DTLS_ANY_VERSION:
-        if (DTLS_VERSION_GT(version, DTLS_MAX_VERSION) ||
+        if (DTLS_VERSION_GT(version, DTLS_MAX_VERSION_INTERNAL) ||
             DTLS_VERSION_LT(version, DTLS1_BAD_VER))
             return 0;
         break;
@@ -1733,7 +1724,7 @@ int ssl_choose_server_version(SSL *s, CLIENTHELLO_MSG *hello, DOWNGRADE *dgrd)
      * With version-flexible methods we have an initial state with:
      *
      *   s->method->version == (D)TLS_ANY_VERSION,
-     *   s->version == (D)TLS_MAX_VERSION.
+     *   s->version == (D)TLS_MAX_VERSION_INTERNAL.
      *
      * So we detect version-flexible methods via the method version, not the
      * handle version.

@@ -1,7 +1,7 @@
 /*
- * Copyright 2015-2018 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2015-2019 The OpenSSL Project Authors. All Rights Reserved.
  *
- * Licensed under the OpenSSL license (the "License").  You may not use
+ * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
  * https://www.openssl.org/source/license.html
@@ -21,6 +21,7 @@
 #include "testutil.h"
 #include "evp_test.h"
 
+#define AAD_NUM 4
 
 typedef struct evp_test_method_st EVP_TEST_METHOD;
 
@@ -457,9 +458,9 @@ typedef struct cipher_data_st {
     size_t plaintext_len;
     unsigned char *ciphertext;
     size_t ciphertext_len;
-    /* GCM, CCM and OCB only */
-    unsigned char *aad;
-    size_t aad_len;
+    /* GCM, CCM, OCB and SIV only */
+    unsigned char *aad[AAD_NUM];
+    size_t aad_len[AAD_NUM];
     unsigned char *tag;
     size_t tag_len;
 } CIPHER_DATA;
@@ -484,6 +485,7 @@ static int cipher_test_init(EVP_TEST *t, const char *alg)
     m = EVP_CIPHER_mode(cipher);
     if (m == EVP_CIPH_GCM_MODE
             || m == EVP_CIPH_OCB_MODE
+            || m == EVP_CIPH_SIV_MODE
             || m == EVP_CIPH_CCM_MODE)
         cdat->aead = m;
     else if (EVP_CIPHER_flags(cipher) & EVP_CIPH_FLAG_AEAD_CIPHER)
@@ -497,13 +499,15 @@ static int cipher_test_init(EVP_TEST *t, const char *alg)
 
 static void cipher_test_cleanup(EVP_TEST *t)
 {
+    int i;
     CIPHER_DATA *cdat = t->data;
 
     OPENSSL_free(cdat->key);
     OPENSSL_free(cdat->iv);
     OPENSSL_free(cdat->ciphertext);
     OPENSSL_free(cdat->plaintext);
-    OPENSSL_free(cdat->aad);
+    for (i = 0; i < AAD_NUM; i++)
+        OPENSSL_free(cdat->aad[i]);
     OPENSSL_free(cdat->tag);
 }
 
@@ -511,6 +515,7 @@ static int cipher_test_parse(EVP_TEST *t, const char *keyword,
                              const char *value)
 {
     CIPHER_DATA *cdat = t->data;
+    int i;
 
     if (strcmp(keyword, "Key") == 0)
         return parse_bin(value, &cdat->key, &cdat->key_len);
@@ -521,8 +526,13 @@ static int cipher_test_parse(EVP_TEST *t, const char *keyword,
     if (strcmp(keyword, "Ciphertext") == 0)
         return parse_bin(value, &cdat->ciphertext, &cdat->ciphertext_len);
     if (cdat->aead) {
-        if (strcmp(keyword, "AAD") == 0)
-            return parse_bin(value, &cdat->aad, &cdat->aad_len);
+        if (strcmp(keyword, "AAD") == 0) {
+            for (i = 0; i < AAD_NUM; i++) {
+                if (cdat->aad[i] == NULL)
+                    return parse_bin(value, &cdat->aad[i], &cdat->aad_len[i]);
+            }
+            return 0;
+        }
         if (strcmp(keyword, "Tag") == 0)
             return parse_bin(value, &cdat->tag, &cdat->tag_len);
     }
@@ -545,7 +555,7 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
     CIPHER_DATA *expected = t->data;
     unsigned char *in, *expected_out, *tmp = NULL;
     size_t in_len, out_len, donelen = 0;
-    int ok = 0, tmplen, chunklen, tmpflen;
+    int ok = 0, tmplen, chunklen, tmpflen, i;
     EVP_CIPHER_CTX *ctx = NULL;
 
     t->err = "TEST_FAILURE";
@@ -647,32 +657,36 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
             goto err;
         }
     }
-    if (expected->aad) {
+    if (expected->aad[0] != NULL) {
         t->err = "AAD_SET_ERROR";
         if (!frag) {
-            if (!EVP_CipherUpdate(ctx, NULL, &chunklen, expected->aad,
-                                  expected->aad_len))
-                goto err;
+            for (i = 0; expected->aad[i] != NULL; i++) {
+                if (!EVP_CipherUpdate(ctx, NULL, &chunklen, expected->aad[i],
+                                      expected->aad_len[i]))
+                    goto err;
+            }
         } else {
             /*
              * Supply the AAD in chunks less than the block size where possible
              */
-            if (expected->aad_len > 0) {
-                if (!EVP_CipherUpdate(ctx, NULL, &chunklen, expected->aad, 1))
-                    goto err;
-                donelen++;
-            }
-            if (expected->aad_len > 2) {
-                if (!EVP_CipherUpdate(ctx, NULL, &chunklen,
-                                      expected->aad + donelen,
-                                      expected->aad_len - 2))
-                    goto err;
-                donelen += expected->aad_len - 2;
-            }
-            if (expected->aad_len > 1
+            for (i = 0; expected->aad[i] != NULL; i++) {
+                if (expected->aad_len[i] > 0) {
+                    if (!EVP_CipherUpdate(ctx, NULL, &chunklen, expected->aad[i], 1))
+                        goto err;
+                    donelen++;
+                }
+                if (expected->aad_len[i] > 2) {
+                    if (!EVP_CipherUpdate(ctx, NULL, &chunklen,
+                                          expected->aad[i] + donelen,
+                                          expected->aad_len[i] - 2))
+                        goto err;
+                    donelen += expected->aad_len[i] - 2;
+                }
+                if (expected->aad_len[i] > 1
                     && !EVP_CipherUpdate(ctx, NULL, &chunklen,
-                                         expected->aad + donelen, 1))
-                goto err;
+                                         expected->aad[i] + donelen, 1))
+                    goto err;
+            }
         }
     }
     EVP_CIPHER_CTX_set_padding(ctx, 0);
@@ -798,10 +812,11 @@ static int cipher_test_run(EVP_TEST *t)
 
         if (out_misalign == 1 && frag == 0) {
             /*
-             * XTS, CCM and Wrap modes have special requirements about input
+             * XTS, SIV, CCM and Wrap modes have special requirements about input
              * lengths so we don't fragment for those
              */
             if (cdat->aead == EVP_CIPH_CCM_MODE
+                    || EVP_CIPHER_mode(cdat->cipher) == EVP_CIPH_SIV_MODE
                     || EVP_CIPHER_mode(cdat->cipher) == EVP_CIPH_XTS_MODE
                     || EVP_CIPHER_mode(cdat->cipher) == EVP_CIPH_WRAP_MODE)
                 break;
@@ -830,56 +845,88 @@ static const EVP_TEST_METHOD cipher_test_method = {
 **/
 
 typedef struct mac_data_st {
-    /* MAC type */
-    int type;
+    /* MAC type in one form or another */
+    const EVP_MAC *mac;          /* for mac_test_run_mac */
+    int type;                    /* for mac_test_run_pkey */
     /* Algorithm string for this MAC */
     char *alg;
     /* MAC key */
     unsigned char *key;
     size_t key_len;
+    /* MAC IV (GMAC) */
+    unsigned char *iv;
+    size_t iv_len;
     /* Input to MAC */
     unsigned char *input;
     size_t input_len;
     /* Expected output */
     unsigned char *output;
     size_t output_len;
+    unsigned char *custom;
+    size_t custom_len;
     /* Collection of controls */
     STACK_OF(OPENSSL_STRING) *controls;
 } MAC_DATA;
 
 static int mac_test_init(EVP_TEST *t, const char *alg)
 {
-    int type;
+    const EVP_MAC *mac = NULL;
+    int type = NID_undef;
     MAC_DATA *mdat;
 
-    if (strcmp(alg, "HMAC") == 0) {
-        type = EVP_PKEY_HMAC;
-    } else if (strcmp(alg, "CMAC") == 0) {
+    if ((mac = EVP_get_macbyname(alg)) == NULL) {
+        /*
+         * Since we didn't find an EVP_MAC, we check for known EVP_PKEY methods
+         * For debugging purposes, we allow 'NNNN by EVP_PKEY' to force running
+         * the EVP_PKEY method.
+         */
+        size_t sz = strlen(alg);
+        static const char epilogue[] = " by EVP_PKEY";
+
+        if (sz >= sizeof(epilogue)
+            && strcmp(alg + sz - (sizeof(epilogue) - 1), epilogue) == 0)
+            sz -= sizeof(epilogue) - 1;
+
+        if (strncmp(alg, "HMAC", sz) == 0) {
+            type = EVP_PKEY_HMAC;
+        } else if (strncmp(alg, "CMAC", sz) == 0) {
 #ifndef OPENSSL_NO_CMAC
-        type = EVP_PKEY_CMAC;
+            type = EVP_PKEY_CMAC;
 #else
-        t->skip = 1;
-        return 1;
+            t->skip = 1;
+            return 1;
 #endif
-    } else if (strcmp(alg, "Poly1305") == 0) {
+        } else if (strncmp(alg, "Poly1305", sz) == 0) {
 #ifndef OPENSSL_NO_POLY1305
-        type = EVP_PKEY_POLY1305;
+            type = EVP_PKEY_POLY1305;
 #else
-        t->skip = 1;
-        return 1;
+            t->skip = 1;
+            return 1;
 #endif
-    } else if (strcmp(alg, "SipHash") == 0) {
+        } else if (strncmp(alg, "SipHash", sz) == 0) {
 #ifndef OPENSSL_NO_SIPHASH
-        type = EVP_PKEY_SIPHASH;
+            type = EVP_PKEY_SIPHASH;
 #else
-        t->skip = 1;
-        return 1;
+            t->skip = 1;
+            return 1;
 #endif
-    } else
-        return 0;
+        } else {
+            /*
+             * Not a known EVP_PKEY method either.  If it's a known OID, then
+             * assume it's been disabled.
+             */
+            if (OBJ_sn2nid(alg) != NID_undef || OBJ_ln2nid(alg) != NID_undef) {
+                t->skip = 1;
+                return 1;
+            }
+
+            return 0;
+        }
+    }
 
     mdat = OPENSSL_zalloc(sizeof(*mdat));
     mdat->type = type;
+    mdat->mac = mac;
     mdat->controls = sk_OPENSSL_STRING_new_null();
     t->data = mdat;
     return 1;
@@ -898,6 +945,8 @@ static void mac_test_cleanup(EVP_TEST *t)
     sk_OPENSSL_STRING_pop_free(mdat->controls, openssl_free);
     OPENSSL_free(mdat->alg);
     OPENSSL_free(mdat->key);
+    OPENSSL_free(mdat->iv);
+    OPENSSL_free(mdat->custom);
     OPENSSL_free(mdat->input);
     OPENSSL_free(mdat->output);
 }
@@ -909,6 +958,10 @@ static int mac_test_parse(EVP_TEST *t,
 
     if (strcmp(keyword, "Key") == 0)
         return parse_bin(value, &mdata->key, &mdata->key_len);
+    if (strcmp(keyword, "IV") == 0)
+        return parse_bin(value, &mdata->iv, &mdata->iv_len);
+    if (strcmp(keyword, "Custom") == 0)
+        return parse_bin(value, &mdata->custom, &mdata->custom_len);
     if (strcmp(keyword, "Algorithm") == 0) {
         mdata->alg = OPENSSL_strdup(value);
         if (!mdata->alg)
@@ -947,7 +1000,7 @@ static int mac_test_ctrl_pkey(EVP_TEST *t, EVP_PKEY_CTX *pctx,
     return rv > 0;
 }
 
-static int mac_test_run(EVP_TEST *t)
+static int mac_test_run_pkey(EVP_TEST *t)
 {
     MAC_DATA *expected = t->data;
     EVP_MD_CTX *mctx = NULL;
@@ -957,6 +1010,12 @@ static int mac_test_run(EVP_TEST *t)
     unsigned char *got = NULL;
     size_t got_len;
     int i;
+
+    if (expected->alg == NULL)
+        TEST_info("Trying the EVP_PKEY %s test", OBJ_nid2sn(expected->type));
+    else
+        TEST_info("Trying the EVP_PKEY %s test with %s",
+                  OBJ_nid2sn(expected->type), expected->alg);
 
 #ifdef OPENSSL_NO_DES
     if (expected->alg != NULL && strstr(expected->alg, "DES") != NULL) {
@@ -1024,6 +1083,149 @@ static int mac_test_run(EVP_TEST *t)
     EVP_PKEY_CTX_free(genctx);
     EVP_PKEY_free(key);
     return 1;
+}
+
+static int mac_test_run_mac(EVP_TEST *t)
+{
+    MAC_DATA *expected = t->data;
+    EVP_MAC_CTX *ctx = NULL;
+    const void *algo = NULL;
+    int algo_ctrl = 0;
+    unsigned char *got = NULL;
+    size_t got_len;
+    int rv, i;
+
+    if (expected->alg == NULL)
+        TEST_info("Trying the EVP_MAC %s test", EVP_MAC_name(expected->mac));
+    else
+        TEST_info("Trying the EVP_MAC %s test with %s",
+                  EVP_MAC_name(expected->mac), expected->alg);
+
+#ifdef OPENSSL_NO_DES
+    if (expected->alg != NULL && strstr(expected->alg, "DES") != NULL) {
+        /* Skip DES */
+        t->err = NULL;
+        goto err;
+    }
+#endif
+
+    if ((ctx = EVP_MAC_CTX_new(expected->mac)) == NULL) {
+        t->err = "MAC_CREATE_ERROR";
+        goto err;
+    }
+
+    if (expected->alg != NULL
+        && ((algo_ctrl = EVP_MAC_CTRL_SET_CIPHER,
+             algo = EVP_get_cipherbyname(expected->alg)) == NULL
+            && (algo_ctrl = EVP_MAC_CTRL_SET_MD,
+                algo = EVP_get_digestbyname(expected->alg)) == NULL)) {
+        t->err = "MAC_BAD_ALGORITHM";
+        goto err;
+    }
+
+
+    if (algo_ctrl != 0) {
+        rv = EVP_MAC_ctrl(ctx, algo_ctrl, algo);
+        if (rv == -2) {
+            t->err = "MAC_CTRL_INVALID";
+            goto err;
+        } else if (rv <= 0) {
+            t->err = "MAC_CTRL_ERROR";
+            goto err;
+        }
+    }
+
+    rv = EVP_MAC_ctrl(ctx, EVP_MAC_CTRL_SET_KEY,
+                      expected->key, expected->key_len);
+    if (rv == -2) {
+        t->err = "MAC_CTRL_INVALID";
+        goto err;
+    } else if (rv <= 0) {
+        t->err = "MAC_CTRL_ERROR";
+        goto err;
+    }
+    if (expected->custom != NULL) {
+        rv = EVP_MAC_ctrl(ctx, EVP_MAC_CTRL_SET_CUSTOM,
+                          expected->custom, expected->custom_len);
+        if (rv == -2) {
+            t->err = "MAC_CTRL_INVALID";
+            goto err;
+        } else if (rv <= 0) {
+            t->err = "MAC_CTRL_ERROR";
+            goto err;
+        }
+    }
+
+    if (expected->iv != NULL) {
+        rv = EVP_MAC_ctrl(ctx, EVP_MAC_CTRL_SET_IV,
+                          expected->iv, expected->iv_len);
+        if (rv == -2) {
+            t->err = "MAC_CTRL_INVALID";
+            goto err;
+        } else if (rv <= 0) {
+            t->err = "MAC_CTRL_ERROR";
+            goto err;
+        }
+    }
+
+    if (!EVP_MAC_init(ctx)) {
+        t->err = "MAC_INIT_ERROR";
+        goto err;
+    }
+    for (i = 0; i < sk_OPENSSL_STRING_num(expected->controls); i++) {
+        char *p, *tmpval;
+        char *value = sk_OPENSSL_STRING_value(expected->controls, i);
+
+        if (!TEST_ptr(tmpval = OPENSSL_strdup(value))) {
+            t->err = "MAC_CTRL_ERROR";
+            goto err;
+        }
+        p = strchr(tmpval, ':');
+        if (p != NULL)
+            *p++ = '\0';
+        rv = EVP_MAC_ctrl_str(ctx, tmpval, p);
+        OPENSSL_free(tmpval);
+        if (rv == -2) {
+            t->err = "MAC_CTRL_INVALID";
+            goto err;
+        } else if (rv <= 0) {
+            t->err = "MAC_CTRL_ERROR";
+            goto err;
+        }
+    }
+    if (!EVP_MAC_update(ctx, expected->input, expected->input_len)) {
+        t->err = "MAC_UPDATE_ERROR";
+        goto err;
+    }
+    if (!EVP_MAC_final(ctx, NULL, &got_len)) {
+        t->err = "MAC_FINAL_LENGTH_ERROR";
+        goto err;
+    }
+    if (!TEST_ptr(got = OPENSSL_malloc(got_len))) {
+        t->err = "TEST_FAILURE";
+        goto err;
+    }
+    if (!EVP_MAC_final(ctx, got, &got_len)
+        || !memory_err_compare(t, "TEST_MAC_ERR",
+                               expected->output, expected->output_len,
+                               got, got_len)) {
+        t->err = "TEST_MAC_ERR";
+        goto err;
+    }
+    t->err = NULL;
+ err:
+    EVP_MAC_CTX_free(ctx);
+    OPENSSL_free(got);
+    return 1;
+}
+
+static int mac_test_run(EVP_TEST *t)
+{
+    MAC_DATA *expected = t->data;
+
+    if (expected->mac != NULL)
+        return mac_test_run_mac(t);
+    return mac_test_run_pkey(t);
 }
 
 static const EVP_TEST_METHOD mac_test_method = {
@@ -1559,15 +1761,18 @@ static int encode_test_init(EVP_TEST *t, const char *encoding)
     } else if (strcmp(encoding, "invalid") == 0) {
         edata->encoding = BASE64_INVALID_ENCODING;
         if (!TEST_ptr(t->expected_err = OPENSSL_strdup("DECODE_ERROR")))
-            return 0;
+            goto err;
     } else {
         TEST_error("Bad encoding: %s."
                    " Should be one of {canonical, valid, invalid}",
                    encoding);
-        return 0;
+        goto err;
     }
     t->data = edata;
     return 1;
+err:
+    OPENSSL_free(edata);
+    return 0;
 }
 
 static void encode_test_cleanup(EVP_TEST *t)
@@ -1596,7 +1801,7 @@ static int encode_test_run(EVP_TEST *t)
     ENCODE_DATA *expected = t->data;
     unsigned char *encode_out = NULL, *decode_out = NULL;
     int output_len, chunk_len;
-    EVP_ENCODE_CTX *decode_ctx;
+    EVP_ENCODE_CTX *decode_ctx = NULL, *encode_ctx = NULL;
 
     if (!TEST_ptr(decode_ctx = EVP_ENCODE_CTX_new())) {
         t->err = "INTERNAL_ERROR";
@@ -1604,7 +1809,6 @@ static int encode_test_run(EVP_TEST *t)
     }
 
     if (expected->encoding == BASE64_CANONICAL_ENCODING) {
-        EVP_ENCODE_CTX *encode_ctx;
 
         if (!TEST_ptr(encode_ctx = EVP_ENCODE_CTX_new())
                 || !TEST_ptr(encode_out =
@@ -1612,14 +1816,14 @@ static int encode_test_run(EVP_TEST *t)
             goto err;
 
         EVP_EncodeInit(encode_ctx);
-        EVP_EncodeUpdate(encode_ctx, encode_out, &chunk_len,
-                         expected->input, expected->input_len);
+        if (!TEST_true(EVP_EncodeUpdate(encode_ctx, encode_out, &chunk_len,
+                                        expected->input, expected->input_len)))
+            goto err;
+
         output_len = chunk_len;
 
         EVP_EncodeFinal(encode_ctx, encode_out + chunk_len, &chunk_len);
         output_len += chunk_len;
-
-        EVP_ENCODE_CTX_free(encode_ctx);
 
         if (!memory_err_compare(t, "BAD_ENCODING",
                                 expected->output, expected->output_len,
@@ -1658,6 +1862,7 @@ static int encode_test_run(EVP_TEST *t)
     OPENSSL_free(encode_out);
     OPENSSL_free(decode_out);
     EVP_ENCODE_CTX_free(decode_ctx);
+    EVP_ENCODE_CTX_free(encode_ctx);
     return 1;
 }
 

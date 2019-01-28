@@ -1,7 +1,7 @@
 /*
  * Copyright 2011-2018 The OpenSSL Project Authors. All Rights Reserved.
  *
- * Licensed under the OpenSSL license (the "License").  You may not use
+ * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
  * https://www.openssl.org/source/license.html
@@ -72,9 +72,24 @@ static const char ossl_pers_string[] = "OpenSSL NIST SP 800-90A DRBG";
 static CRYPTO_ONCE rand_drbg_init = CRYPTO_ONCE_STATIC_INIT;
 
 
+#define RAND_DRBG_TYPE_FLAGS    ( \
+    RAND_DRBG_FLAG_MASTER | RAND_DRBG_FLAG_PUBLIC | RAND_DRBG_FLAG_PRIVATE )
 
-static int rand_drbg_type = RAND_DRBG_TYPE;
-static unsigned int rand_drbg_flags = RAND_DRBG_FLAGS;
+#define RAND_DRBG_TYPE_MASTER                     0
+#define RAND_DRBG_TYPE_PUBLIC                     1
+#define RAND_DRBG_TYPE_PRIVATE                    2
+
+/* Defaults */
+static int rand_drbg_type[3] = {
+    RAND_DRBG_TYPE, /* Master */
+    RAND_DRBG_TYPE, /* Public */
+    RAND_DRBG_TYPE  /* Private */
+};
+static unsigned int rand_drbg_flags[3] = {
+    RAND_DRBG_FLAGS | RAND_DRBG_FLAG_MASTER, /* Master */
+    RAND_DRBG_FLAGS | RAND_DRBG_FLAG_PUBLIC, /* Public */
+    RAND_DRBG_FLAGS | RAND_DRBG_FLAG_PRIVATE /* Private */
+};
 
 static unsigned int master_reseed_interval = MASTER_RESEED_INTERVAL;
 static unsigned int slave_reseed_interval  = SLAVE_RESEED_INTERVAL;
@@ -84,14 +99,47 @@ static time_t slave_reseed_time_interval  = SLAVE_RESEED_TIME_INTERVAL;
 
 /* A logical OR of all used DRBG flag bits (currently there is only one) */
 static const unsigned int rand_drbg_used_flags =
-    RAND_DRBG_FLAG_CTR_NO_DF;
+    RAND_DRBG_FLAG_CTR_NO_DF | RAND_DRBG_FLAG_HMAC | RAND_DRBG_TYPE_FLAGS;
 
-static RAND_DRBG *drbg_setup(RAND_DRBG *parent);
+
+static RAND_DRBG *drbg_setup(RAND_DRBG *parent, int drbg_type);
 
 static RAND_DRBG *rand_drbg_new(int secure,
                                 int type,
                                 unsigned int flags,
                                 RAND_DRBG *parent);
+
+static int is_ctr(int type)
+{
+    switch (type) {
+    case NID_aes_128_ctr:
+    case NID_aes_192_ctr:
+    case NID_aes_256_ctr:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int is_digest(int type)
+{
+    switch (type) {
+    case NID_sha1:
+    case NID_sha224:
+    case NID_sha256:
+    case NID_sha384:
+    case NID_sha512:
+    case NID_sha512_224:
+    case NID_sha512_256:
+    case NID_sha3_224:
+    case NID_sha3_256:
+    case NID_sha3_384:
+    case NID_sha3_512:
+        return 1;
+    default:
+        return 0;
+    }
+}
 
 /*
  * Set/initialize |drbg| to be of type |type|, with optional |flags|.
@@ -105,8 +153,8 @@ int RAND_DRBG_set(RAND_DRBG *drbg, int type, unsigned int flags)
     int ret = 1;
 
     if (type == 0 && flags == 0) {
-        type = rand_drbg_type;
-        flags = rand_drbg_flags;
+        type = rand_drbg_type[RAND_DRBG_TYPE_MASTER];
+        flags = rand_drbg_flags[RAND_DRBG_TYPE_MASTER];
     }
 
     /* If set is called multiple times - clear the old one */
@@ -120,22 +168,23 @@ int RAND_DRBG_set(RAND_DRBG *drbg, int type, unsigned int flags)
     drbg->flags = flags;
     drbg->type = type;
 
-    switch (type) {
-    default:
+    if (type == 0) {
+        /* Uninitialized; that's okay. */
+        drbg->meth = NULL;
+        return 1;
+    } else if (is_ctr(type)) {
+        ret = drbg_ctr_init(drbg);
+    } else if (is_digest(type)) {
+        if (flags & RAND_DRBG_FLAG_HMAC)
+            ret = drbg_hmac_init(drbg);
+        else
+            ret = drbg_hash_init(drbg);
+    } else {
         drbg->type = 0;
         drbg->flags = 0;
         drbg->meth = NULL;
         RANDerr(RAND_F_RAND_DRBG_SET, RAND_R_UNSUPPORTED_DRBG_TYPE);
         return 0;
-    case 0:
-        /* Uninitialized; that's okay. */
-        drbg->meth = NULL;
-        return 1;
-    case NID_aes_128_ctr:
-    case NID_aes_192_ctr:
-    case NID_aes_256_ctr:
-        ret = drbg_ctr_init(drbg);
-        break;
     }
 
     if (ret == 0) {
@@ -152,16 +201,10 @@ int RAND_DRBG_set(RAND_DRBG *drbg, int type, unsigned int flags)
  */
 int RAND_DRBG_set_defaults(int type, unsigned int flags)
 {
-    int ret = 1;
-
-    switch (type) {
-    default:
+    int all;
+    if (!(is_digest(type) || is_ctr(type))) {
         RANDerr(RAND_F_RAND_DRBG_SET_DEFAULTS, RAND_R_UNSUPPORTED_DRBG_TYPE);
         return 0;
-    case NID_aes_128_ctr:
-    case NID_aes_192_ctr:
-    case NID_aes_256_ctr:
-        break;
     }
 
     if ((flags & ~rand_drbg_used_flags) != 0) {
@@ -169,10 +212,20 @@ int RAND_DRBG_set_defaults(int type, unsigned int flags)
         return 0;
     }
 
-    rand_drbg_type  = type;
-    rand_drbg_flags = flags;
-
-    return ret;
+    all = ((flags & RAND_DRBG_TYPE_FLAGS) == 0);
+    if (all || (flags & RAND_DRBG_FLAG_MASTER) != 0) {
+        rand_drbg_type[RAND_DRBG_TYPE_MASTER] = type;
+        rand_drbg_flags[RAND_DRBG_TYPE_MASTER] = flags | RAND_DRBG_FLAG_MASTER;
+    }
+    if (all || (flags & RAND_DRBG_FLAG_PUBLIC) != 0) {
+        rand_drbg_type[RAND_DRBG_TYPE_PUBLIC]  = type;
+        rand_drbg_flags[RAND_DRBG_TYPE_PUBLIC] = flags | RAND_DRBG_FLAG_PUBLIC;
+    }
+    if (all || (flags & RAND_DRBG_FLAG_PRIVATE) != 0) {
+        rand_drbg_type[RAND_DRBG_TYPE_PRIVATE] = type;
+        rand_drbg_flags[RAND_DRBG_TYPE_PRIVATE] = flags | RAND_DRBG_FLAG_PRIVATE;
+    }
+    return 1;
 }
 
 
@@ -382,6 +435,7 @@ int RAND_DRBG_instantiate(RAND_DRBG *drbg,
  */
 int RAND_DRBG_uninstantiate(RAND_DRBG *drbg)
 {
+    int index = -1, type, flags;
     if (drbg->meth == NULL) {
         drbg->state = DRBG_ERROR;
         RANDerr(RAND_F_RAND_DRBG_UNINSTANTIATE,
@@ -394,7 +448,23 @@ int RAND_DRBG_uninstantiate(RAND_DRBG *drbg)
      * initial values.
      */
     drbg->meth->uninstantiate(drbg);
-    return RAND_DRBG_set(drbg, drbg->type, drbg->flags);
+
+    /* The reset uses the default values for type and flags */
+    if (drbg->flags & RAND_DRBG_FLAG_MASTER)
+        index = RAND_DRBG_TYPE_MASTER;
+    else if (drbg->flags & RAND_DRBG_FLAG_PRIVATE)
+        index = RAND_DRBG_TYPE_PRIVATE;
+    else if (drbg->flags & RAND_DRBG_FLAG_PUBLIC)
+        index = RAND_DRBG_TYPE_PUBLIC;
+
+    if (index != -1) {
+        flags = rand_drbg_flags[index];
+        type = rand_drbg_type[index];
+    } else {
+        flags = drbg->flags;
+        type = drbg->type;
+    }
+    return RAND_DRBG_set(drbg, type, flags);
 }
 
 /*
@@ -609,7 +679,7 @@ int RAND_DRBG_generate(RAND_DRBG *drbg, unsigned char *out, size_t outlen,
     }
 
     if (drbg->reseed_interval > 0) {
-        if (drbg->reseed_gen_counter >= drbg->reseed_interval)
+        if (drbg->reseed_gen_counter > drbg->reseed_interval)
             reseed_required = 1;
     }
     if (drbg->reseed_time_interval > 0) {
@@ -868,11 +938,12 @@ void *RAND_DRBG_get_ex_data(const RAND_DRBG *drbg, int idx)
  *
  * Returns a pointer to the new DRBG instance on success, NULL on failure.
  */
-static RAND_DRBG *drbg_setup(RAND_DRBG *parent)
+static RAND_DRBG *drbg_setup(RAND_DRBG *parent, int drbg_type)
 {
     RAND_DRBG *drbg;
 
-    drbg = RAND_DRBG_secure_new(rand_drbg_type, rand_drbg_flags, parent);
+    drbg = RAND_DRBG_secure_new(rand_drbg_type[drbg_type],
+                                rand_drbg_flags[drbg_type], parent);
     if (drbg == NULL)
         return NULL;
 
@@ -918,7 +989,7 @@ DEFINE_RUN_ONCE_STATIC(do_rand_drbg_init)
     if (!CRYPTO_THREAD_init_local(&public_drbg, NULL))
         goto err1;
 
-    master_drbg = drbg_setup(NULL);
+    master_drbg = drbg_setup(NULL, RAND_DRBG_TYPE_MASTER);
     if (master_drbg == NULL)
         goto err2;
 
@@ -1117,7 +1188,7 @@ RAND_DRBG *RAND_DRBG_get0_public(void)
     if (drbg == NULL) {
         if (!ossl_init_thread_start(OPENSSL_INIT_THREAD_RAND))
             return NULL;
-        drbg = drbg_setup(master_drbg);
+        drbg = drbg_setup(master_drbg, RAND_DRBG_TYPE_PUBLIC);
         CRYPTO_THREAD_set_local(&public_drbg, drbg);
     }
     return drbg;
@@ -1138,7 +1209,7 @@ RAND_DRBG *RAND_DRBG_get0_private(void)
     if (drbg == NULL) {
         if (!ossl_init_thread_start(OPENSSL_INIT_THREAD_RAND))
             return NULL;
-        drbg = drbg_setup(master_drbg);
+        drbg = drbg_setup(master_drbg, RAND_DRBG_TYPE_PRIVATE);
         CRYPTO_THREAD_set_local(&private_drbg, drbg);
     }
     return drbg;

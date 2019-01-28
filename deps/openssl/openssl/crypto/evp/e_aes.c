@@ -1,7 +1,7 @@
 /*
  * Copyright 2001-2018 The OpenSSL Project Authors. All Rights Reserved.
  *
- * Licensed under the OpenSSL license (the "License").  You may not use
+ * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
  * in the file LICENSE in the source distribution or at
  * https://www.openssl.org/source/license.html
@@ -17,6 +17,7 @@
 #include "internal/evp_int.h"
 #include "modes_lcl.h"
 #include <openssl/rand.h>
+#include <openssl/cmac.h>
 #include "evp_locl.h"
 
 typedef struct {
@@ -44,6 +45,7 @@ typedef struct {
     int taglen;
     int iv_gen;                 /* It is OK to generate IVs */
     int tls_aad_len;            /* TLS AAD length */
+    uint64_t tls_enc_records;   /* Number of TLS records encrypted */
     ctr128_f ctr;
 } EVP_AES_GCM_CTX;
 
@@ -539,7 +541,8 @@ const EVP_CIPHER *EVP_aes_##keylen##_##mode(void) \
 # define BLOCK_CIPHER_custom(nid,keylen,blocksize,ivlen,mode,MODE,flags) \
 static const EVP_CIPHER aesni_##keylen##_##mode = { \
         nid##_##keylen##_##mode,blocksize, \
-        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
+        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE?2:1)*keylen/8, \
+        ivlen,                          \
         flags|EVP_CIPH_##MODE##_MODE,   \
         aesni_##mode##_init_key,        \
         aesni_##mode##_cipher,          \
@@ -548,7 +551,8 @@ static const EVP_CIPHER aesni_##keylen##_##mode = { \
         NULL,NULL,aes_##mode##_ctrl,NULL }; \
 static const EVP_CIPHER aes_##keylen##_##mode = { \
         nid##_##keylen##_##mode,blocksize, \
-        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
+        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE?2:1)*keylen/8, \
+        ivlen,                          \
         flags|EVP_CIPH_##MODE##_MODE,   \
         aes_##mode##_init_key,          \
         aes_##mode##_cipher,            \
@@ -923,6 +927,11 @@ static int aes_t4_ocb_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                              const unsigned char *in, size_t len);
 # endif                        /* OPENSSL_NO_OCB */
 
+# ifndef OPENSSL_NO_SIV
+#  define aes_t4_siv_init_key aes_siv_init_key
+#  define aes_t4_siv_cipher aes_siv_cipher
+# endif /* OPENSSL_NO_SIV */
+
 # define BLOCK_CIPHER_generic(nid,keylen,blocksize,ivlen,nmode,mode,MODE,flags) \
 static const EVP_CIPHER aes_t4_##keylen##_##mode = { \
         nid##_##keylen##_##nmode,blocksize,keylen/8,ivlen, \
@@ -947,7 +956,8 @@ const EVP_CIPHER *EVP_aes_##keylen##_##mode(void) \
 # define BLOCK_CIPHER_custom(nid,keylen,blocksize,ivlen,mode,MODE,flags) \
 static const EVP_CIPHER aes_t4_##keylen##_##mode = { \
         nid##_##keylen##_##mode,blocksize, \
-        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
+        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE?2:1)*keylen/8, \
+        ivlen,                          \
         flags|EVP_CIPH_##MODE##_MODE,   \
         aes_t4_##mode##_init_key,       \
         aes_t4_##mode##_cipher,         \
@@ -956,7 +966,8 @@ static const EVP_CIPHER aes_t4_##keylen##_##mode = { \
         NULL,NULL,aes_##mode##_ctrl,NULL }; \
 static const EVP_CIPHER aes_##keylen##_##mode = { \
         nid##_##keylen##_##mode,blocksize, \
-        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
+        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE?2:1)*keylen/8, \
+        ivlen,                          \
         flags|EVP_CIPH_##MODE##_MODE,   \
         aes_##mode##_init_key,          \
         aes_##mode##_cipher,            \
@@ -1069,6 +1080,7 @@ typedef struct {
     int kreslen;
 
     int tls_aad_len;
+    uint64_t tls_enc_records;   /* Number of TLS records encrypted */
 } S390X_AES_GCM_CTX;
 
 typedef struct {
@@ -1692,6 +1704,7 @@ static int s390x_aes_gcm_ctrl(EVP_CIPHER_CTX *c, int type, int arg, void *ptr)
         buf = EVP_CIPHER_CTX_buf_noconst(c);
         memcpy(buf, ptr, arg);
         gctx->tls_aad_len = arg;
+        gctx->tls_enc_records = 0;
 
         len = buf[arg - 2] << 8 | buf[arg - 1];
         /* Correct length for explicit iv. */
@@ -1790,6 +1803,17 @@ static int s390x_aes_gcm_tls_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
 
     if (out != in || len < (EVP_GCM_TLS_EXPLICIT_IV_LEN + EVP_GCM_TLS_TAG_LEN))
         return -1;
+
+    /*
+     * Check for too many keys as per FIPS 140-2 IG A.5 "Key/IV Pair Uniqueness
+     * Requirements from SP 800-38D".  The requirements is for one party to the
+     * communication to fail after 2^64 - 1 keys.  We do this on the encrypting
+     * side only.
+     */
+    if (ctx->encrypt && ++gctx->tls_enc_records == 0) {
+        EVPerr(EVP_F_S390X_AES_GCM_TLS_CIPHER, EVP_R_TOO_MANY_RECORDS);
+        goto err;
+    }
 
     if (EVP_CIPHER_CTX_ctrl(ctx, enc ? EVP_CTRL_GCM_IV_GEN
                                      : EVP_CTRL_GCM_SET_IV_INV,
@@ -2408,6 +2432,18 @@ static int s390x_aes_ocb_cleanup(EVP_CIPHER_CTX *);
 static int s390x_aes_ocb_ctrl(EVP_CIPHER_CTX *, int type, int arg, void *ptr);
 # endif
 
+# ifndef OPENSSL_NO_SIV
+#  define S390X_AES_SIV_CTX             EVP_AES_SIV_CTX
+#  define S390X_aes_128_siv_CAPABLE     0
+#  define S390X_aes_192_siv_CAPABLE     0
+#  define S390X_aes_256_siv_CAPABLE     0
+
+#  define s390x_aes_siv_init_key aes_siv_init_key
+#  define s390x_aes_siv_cipher aes_siv_cipher
+#  define s390x_aes_siv_cleanup aes_siv_cleanup
+#  define s390x_aes_siv_ctrl aes_siv_ctrl
+# endif
+
 # define BLOCK_CIPHER_generic(nid,keylen,blocksize,ivlen,nmode,mode,	\
                               MODE,flags)				\
 static const EVP_CIPHER s390x_aes_##keylen##_##mode = {			\
@@ -2449,7 +2485,7 @@ const EVP_CIPHER *EVP_aes_##keylen##_##mode(void)			\
 static const EVP_CIPHER s390x_aes_##keylen##_##mode = {			\
     nid##_##keylen##_##mode,						\
     blocksize,								\
-    (EVP_CIPH_##MODE##_MODE == EVP_CIPH_XTS_MODE ? 2 : 1) * keylen / 8,	\
+    (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE ? 2 : 1) * keylen / 8,	\
     ivlen,								\
     flags | EVP_CIPH_##MODE##_MODE,					\
     s390x_aes_##mode##_init_key,					\
@@ -2463,7 +2499,7 @@ static const EVP_CIPHER s390x_aes_##keylen##_##mode = {			\
 };									\
 static const EVP_CIPHER aes_##keylen##_##mode = {			\
     nid##_##keylen##_##mode,blocksize,					\
-    (EVP_CIPH_##MODE##_MODE == EVP_CIPH_XTS_MODE ? 2 : 1) * keylen / 8,	\
+    (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE ? 2 : 1) * keylen / 8,	\
     ivlen,								\
     flags | EVP_CIPH_##MODE##_MODE,					\
     aes_##mode##_init_key,						\
@@ -2498,7 +2534,8 @@ const EVP_CIPHER *EVP_aes_##keylen##_##mode(void) \
 # define BLOCK_CIPHER_custom(nid,keylen,blocksize,ivlen,mode,MODE,flags) \
 static const EVP_CIPHER aes_##keylen##_##mode = { \
         nid##_##keylen##_##mode,blocksize, \
-        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
+        (EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE||EVP_CIPH_##MODE##_MODE==EVP_CIPH_SIV_MODE?2:1)*keylen/8, \
+        ivlen,                          \
         flags|EVP_CIPH_##MODE##_MODE,   \
         aes_##mode##_init_key,          \
         aes_##mode##_cipher,            \
@@ -2852,6 +2889,14 @@ static int aes_gcm_ctrl(EVP_CIPHER_CTX *c, int type, int arg, void *ptr)
         memcpy(ptr, c->buf, arg);
         return 1;
 
+    case EVP_CTRL_GET_IV:
+        if (gctx->iv_gen != 1)
+            return 0;
+        if (gctx->ivlen != arg)
+            return 0;
+        memcpy(ptr, gctx->iv, arg);
+        return 1;
+
     case EVP_CTRL_GCM_SET_IV_FIXED:
         /* Special case: -1 length restores whole IV */
         if (arg == -1) {
@@ -2901,6 +2946,7 @@ static int aes_gcm_ctrl(EVP_CIPHER_CTX *c, int type, int arg, void *ptr)
             return 0;
         memcpy(c->buf, ptr, arg);
         gctx->tls_aad_len = arg;
+        gctx->tls_enc_records = 0;
         {
             unsigned int len = c->buf[arg - 2] << 8 | c->buf[arg - 1];
             /* Correct length for explicit IV */
@@ -3035,6 +3081,18 @@ static int aes_gcm_tls_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
     if (out != in
         || len < (EVP_GCM_TLS_EXPLICIT_IV_LEN + EVP_GCM_TLS_TAG_LEN))
         return -1;
+    
+    /*
+     * Check for too many keys as per FIPS 140-2 IG A.5 "Key/IV Pair Uniqueness
+     * Requirements from SP 800-38D".  The requirements is for one party to the
+     * communication to fail after 2^64 - 1 keys.  We do this on the encrypting
+     * side only.
+     */
+    if (ctx->encrypt && ++gctx->tls_enc_records == 0) {
+        EVPerr(EVP_F_AES_GCM_TLS_CIPHER, EVP_R_TOO_MANY_RECORDS);
+        goto err;
+    }
+
     /*
      * Set IV from start of buffer or generate IV and write to start of
      * buffer.
@@ -3410,10 +3468,30 @@ static int aes_xts_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                           const unsigned char *in, size_t len)
 {
     EVP_AES_XTS_CTX *xctx = EVP_C_DATA(EVP_AES_XTS_CTX,ctx);
-    if (!xctx->xts.key1 || !xctx->xts.key2)
+
+    if (xctx->xts.key1 == NULL
+            || xctx->xts.key2 == NULL
+            || out == NULL
+            || in == NULL
+            || len < AES_BLOCK_SIZE)
         return 0;
-    if (!out || !in || len < AES_BLOCK_SIZE)
+
+    /*
+     * Verify that the two keys are different.
+     *
+     * This addresses the vulnerability described in Rogaway's September 2004
+     * paper (http://web.cs.ucdavis.edu/~rogaway/papers/offsets.pdf):
+     *      "Efficient Instantiations of Tweakable Blockciphers and Refinements
+     *       to Modes OCB and PMAC".
+     *
+     * FIPS 140-2 IG A.9 XTS-AES Key Generation Requirements states that:
+     *      "The check for Key_1 != Key_2 shall be done at any place BEFORE
+     *       using the keys in the XTS-AES algorithm to process data with them."
+    */
+    if (CRYPTO_memcmp(xctx->xts.key1, xctx->xts.key2,
+                      EVP_CIPHER_CTX_key_length(ctx) / 2) == 0)
         return 0;
+
     if (xctx->stream)
         (*xctx->stream) (in, out, len,
                          xctx->xts.key1, xctx->xts.key2,
@@ -4208,3 +4286,114 @@ BLOCK_CIPHER_custom(NID_aes, 192, 16, 12, ocb, OCB,
 BLOCK_CIPHER_custom(NID_aes, 256, 16, 12, ocb, OCB,
                     EVP_CIPH_FLAG_AEAD_CIPHER | CUSTOM_FLAGS)
 #endif                         /* OPENSSL_NO_OCB */
+
+/* AES-SIV mode */
+#ifndef OPENSSL_NO_SIV
+
+typedef SIV128_CONTEXT EVP_AES_SIV_CTX;
+
+#define aesni_siv_init_key aes_siv_init_key
+static int aes_siv_init_key(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+                            const unsigned char *iv, int enc)
+{
+    const EVP_CIPHER *ctr;
+    const EVP_CIPHER *cbc;
+    SIV128_CONTEXT *sctx = EVP_C_DATA(SIV128_CONTEXT, ctx);
+    int klen = EVP_CIPHER_CTX_key_length(ctx) / 2;
+
+    if (key == NULL)
+        return 1;
+
+    switch (klen) {
+    case 16:
+        cbc = EVP_aes_128_cbc();
+        ctr = EVP_aes_128_ctr();
+        break;
+    case 24:
+        cbc = EVP_aes_192_cbc();
+        ctr = EVP_aes_192_ctr();
+        break;
+    case 32:
+        cbc = EVP_aes_256_cbc();
+        ctr = EVP_aes_256_ctr();
+        break;
+    default:
+        return 0;
+    }
+
+    /* klen is the length of the underlying cipher, not the input key,
+       which should be twice as long */
+    return CRYPTO_siv128_init(sctx, key, klen, cbc, ctr);
+}
+
+#define aesni_siv_cipher aes_siv_cipher
+static int aes_siv_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
+                          const unsigned char *in, size_t len)
+{
+    SIV128_CONTEXT *sctx = EVP_C_DATA(SIV128_CONTEXT, ctx);
+
+    /* EncryptFinal or DecryptFinal */
+    if (in == NULL)
+        return CRYPTO_siv128_finish(sctx);
+
+    /* Deal with associated data */
+    if (out == NULL)
+        return CRYPTO_siv128_aad(sctx, in, len);
+
+    if (EVP_CIPHER_CTX_encrypting(ctx))
+        return CRYPTO_siv128_encrypt(sctx, in, out, len);
+
+    return CRYPTO_siv128_decrypt(sctx, in, out, len);
+}
+
+#define aesni_siv_cleanup aes_siv_cleanup
+static int aes_siv_cleanup(EVP_CIPHER_CTX *c)
+{
+    SIV128_CONTEXT *sctx = EVP_C_DATA(SIV128_CONTEXT, c);
+
+    return CRYPTO_siv128_cleanup(sctx);
+}
+
+
+#define aesni_siv_ctrl aes_siv_ctrl
+static int aes_siv_ctrl(EVP_CIPHER_CTX *c, int type, int arg, void *ptr)
+{
+    SIV128_CONTEXT *sctx = EVP_C_DATA(SIV128_CONTEXT, c);
+    SIV128_CONTEXT *sctx_out;
+
+    switch (type) {
+    case EVP_CTRL_INIT:
+        return CRYPTO_siv128_cleanup(sctx);
+
+    case EVP_CTRL_SET_SPEED:
+        return CRYPTO_siv128_speed(sctx, arg);
+
+    case EVP_CTRL_AEAD_SET_TAG:
+        if (!EVP_CIPHER_CTX_encrypting(c))
+            return CRYPTO_siv128_set_tag(sctx, ptr, arg);
+        return 1;
+
+    case EVP_CTRL_AEAD_GET_TAG:
+        if (!EVP_CIPHER_CTX_encrypting(c))
+            return 0;
+        return CRYPTO_siv128_get_tag(sctx, ptr, arg);
+
+    case EVP_CTRL_COPY:
+        sctx_out = EVP_C_DATA(SIV128_CONTEXT, (EVP_CIPHER_CTX*)ptr);
+        return CRYPTO_siv128_copy_ctx(sctx_out, sctx);
+
+    default:
+        return -1;
+
+    }
+}
+
+#define SIV_FLAGS    (EVP_CIPH_FLAG_AEAD_CIPHER | EVP_CIPH_FLAG_DEFAULT_ASN1 \
+                      | EVP_CIPH_CUSTOM_IV | EVP_CIPH_FLAG_CUSTOM_CIPHER \
+                      | EVP_CIPH_ALWAYS_CALL_INIT | EVP_CIPH_CUSTOM_COPY \
+                      | EVP_CIPH_CTRL_INIT)
+
+BLOCK_CIPHER_custom(NID_aes, 128, 1, 0, siv, SIV, SIV_FLAGS)
+BLOCK_CIPHER_custom(NID_aes, 192, 1, 0, siv, SIV, SIV_FLAGS)
+BLOCK_CIPHER_custom(NID_aes, 256, 1, 0, siv, SIV, SIV_FLAGS)
+#endif
