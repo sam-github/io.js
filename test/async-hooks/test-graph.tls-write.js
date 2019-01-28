@@ -40,7 +40,7 @@ function onsecureConnection() {}
 
 function onsecureConnect() {
   // Destroying client socket
-  this.destroy();
+  this.end();
 
   // Closing server
   server.close(common.mustCall(onserverClosed));

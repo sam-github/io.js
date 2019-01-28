@@ -27,87 +27,84 @@ extern "C" {
  * OpenSSL was configured with the following options:
  */
 
-# define OPENSSL_MIN_API -1
-# ifndef OPENSSL_RAND_SEED_OS
-#  define OPENSSL_RAND_SEED_OS
-# endif
-# ifndef OPENSSL_NO_AFALGENG
-#  define OPENSSL_NO_AFALGENG
-# endif
-# ifndef OPENSSL_NO_ASAN
-#  define OPENSSL_NO_ASAN
-# endif
-# ifndef OPENSSL_NO_COMP
-#  define OPENSSL_NO_COMP
-# endif
-# ifndef OPENSSL_NO_CRYPTO_MDEBUG
-#  define OPENSSL_NO_CRYPTO_MDEBUG
-# endif
-# ifndef OPENSSL_NO_CRYPTO_MDEBUG_BACKTRACE
-#  define OPENSSL_NO_CRYPTO_MDEBUG_BACKTRACE
-# endif
-# ifndef OPENSSL_NO_DEVCRYPTOENG
-#  define OPENSSL_NO_DEVCRYPTOENG
-# endif
-# ifndef OPENSSL_NO_EC_NISTP_64_GCC_128
-#  define OPENSSL_NO_EC_NISTP_64_GCC_128
-# endif
-# ifndef OPENSSL_NO_EGD
-#  define OPENSSL_NO_EGD
-# endif
-# ifndef OPENSSL_NO_EXTERNAL_TESTS
-#  define OPENSSL_NO_EXTERNAL_TESTS
-# endif
-# ifndef OPENSSL_NO_FUZZ_AFL
-#  define OPENSSL_NO_FUZZ_AFL
-# endif
-# ifndef OPENSSL_NO_FUZZ_LIBFUZZER
-#  define OPENSSL_NO_FUZZ_LIBFUZZER
-# endif
-# ifndef OPENSSL_NO_HEARTBEATS
-#  define OPENSSL_NO_HEARTBEATS
-# endif
-# ifndef OPENSSL_NO_KTLS
-#  define OPENSSL_NO_KTLS
-# endif
-# ifndef OPENSSL_NO_MD2
-#  define OPENSSL_NO_MD2
-# endif
-# ifndef OPENSSL_NO_MSAN
-#  define OPENSSL_NO_MSAN
-# endif
-# ifndef OPENSSL_NO_RC5
-#  define OPENSSL_NO_RC5
-# endif
-# ifndef OPENSSL_NO_SCTP
-#  define OPENSSL_NO_SCTP
-# endif
-# ifndef OPENSSL_NO_SSL_TRACE
-# endif
-# ifndef OPENSSL_NO_SSL3
-#  define OPENSSL_NO_SSL3
-# endif
-# ifndef OPENSSL_NO_SSL3_METHOD
-#  define OPENSSL_NO_SSL3_METHOD
-# endif
-# ifndef OPENSSL_NO_UBSAN
-#  define OPENSSL_NO_UBSAN
-# endif
-# ifndef OPENSSL_NO_UNIT_TEST
-#  define OPENSSL_NO_UNIT_TEST
-# endif
-# ifndef OPENSSL_NO_WEAK_SSL_CIPHERS
-#  define OPENSSL_NO_WEAK_SSL_CIPHERS
-# endif
-# ifndef OPENSSL_THREADS
-#  define OPENSSL_THREADS
-# endif
-# ifndef OPENSSL_NO_DYNAMIC_ENGINE
-#  define OPENSSL_NO_DYNAMIC_ENGINE
-# endif
-# ifndef OPENSSL_NO_AFALGENG
-#  define OPENSSL_NO_AFALGENG
-# endif
+#ifndef OPENSSL_NO_COMP
+# define OPENSSL_NO_COMP
+#endif
+#ifndef OPENSSL_NO_MD2
+# define OPENSSL_NO_MD2
+#endif
+#ifndef OPENSSL_NO_RC5
+# define OPENSSL_NO_RC5
+#endif
+#ifndef OPENSSL_THREADS
+# define OPENSSL_THREADS
+#endif
+#ifndef OPENSSL_RAND_SEED_OS
+# define OPENSSL_RAND_SEED_OS
+#endif
+#ifndef OPENSSL_NO_AFALGENG
+# define OPENSSL_NO_AFALGENG
+#endif
+#ifndef OPENSSL_NO_ASAN
+# define OPENSSL_NO_ASAN
+#endif
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG
+# define OPENSSL_NO_CRYPTO_MDEBUG
+#endif
+#ifndef OPENSSL_NO_CRYPTO_MDEBUG_BACKTRACE
+# define OPENSSL_NO_CRYPTO_MDEBUG_BACKTRACE
+#endif
+#ifndef OPENSSL_NO_DEVCRYPTOENG
+# define OPENSSL_NO_DEVCRYPTOENG
+#endif
+#ifndef OPENSSL_NO_EC_NISTP_64_GCC_128
+# define OPENSSL_NO_EC_NISTP_64_GCC_128
+#endif
+#ifndef OPENSSL_NO_EGD
+# define OPENSSL_NO_EGD
+#endif
+#ifndef OPENSSL_NO_EXTERNAL_TESTS
+# define OPENSSL_NO_EXTERNAL_TESTS
+#endif
+#ifndef OPENSSL_NO_FUZZ_AFL
+# define OPENSSL_NO_FUZZ_AFL
+#endif
+#ifndef OPENSSL_NO_FUZZ_LIBFUZZER
+# define OPENSSL_NO_FUZZ_LIBFUZZER
+#endif
+#ifndef OPENSSL_NO_HEARTBEATS
+# define OPENSSL_NO_HEARTBEATS
+#endif
+#ifndef OPENSSL_NO_MSAN
+# define OPENSSL_NO_MSAN
+#endif
+#ifndef OPENSSL_NO_SCTP
+# define OPENSSL_NO_SCTP
+#endif
+#ifndef OPENSSL_NO_SSL_TRACE
+// # define OPENSSL_NO_SSL_TRACE
+#endif
+#ifndef OPENSSL_NO_SSL3
+# define OPENSSL_NO_SSL3
+#endif
+#ifndef OPENSSL_NO_SSL3_METHOD
+# define OPENSSL_NO_SSL3_METHOD
+#endif
+#ifndef OPENSSL_NO_UBSAN
+# define OPENSSL_NO_UBSAN
+#endif
+#ifndef OPENSSL_NO_UNIT_TEST
+# define OPENSSL_NO_UNIT_TEST
+#endif
+#ifndef OPENSSL_NO_WEAK_SSL_CIPHERS
+# define OPENSSL_NO_WEAK_SSL_CIPHERS
+#endif
+#ifndef OPENSSL_NO_DYNAMIC_ENGINE
+# define OPENSSL_NO_DYNAMIC_ENGINE
+#endif
+#ifndef OPENSSL_NO_AFALGENG
+# define OPENSSL_NO_AFALGENG
+#endif
 
 
 /*
