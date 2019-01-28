@@ -198,7 +198,7 @@
       'openssl/crypto/cast/c_ofb64.c',
       'openssl/crypto/cast/c_skey.c',
       'openssl/crypto/cmac/cm_ameth.c',
-      'openssl/crypto/cmac/cm_pmeth.c',
+      'openssl/crypto/cmac/cm_meth.c',
       'openssl/crypto/cmac/cmac.c',
       'openssl/crypto/cms/cms_asn1.c',
       'openssl/crypto/cms/cms_att.c',
