@@ -29,9 +29,12 @@ const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
 const options = {
+  enableTrace: true,
   key: fixtures.readKey('agent2-key.pem'),
   cert: fixtures.readKey('agent2-cert.pem')
 };
+
+tls.DEFAULT_MAX_VERSION = 'TLSv1.3';
 
 // Contains a UTF8 only character
 const messageUtf8 = 'x√ab c';
@@ -40,6 +43,7 @@ const messageUtf8 = 'x√ab c';
 const messageAscii = 'xb\b\u001aab c';
 
 const server = tls.Server(options, common.mustCall(function(socket) {
+  console.log('* server: on connect, send message & close');
   socket.end(messageUtf8);
 }));
 
@@ -49,18 +53,25 @@ server.listen(0, function() {
     port: this.address().port,
     rejectUnauthorized: false
   });
+  //client.enableTrace();
 
   let buffer = '';
 
   client.setEncoding('ascii');
 
   client.on('data', function(d) {
+    console.log('* client: on data', d);
     assert.ok(typeof d === 'string');
     buffer += d;
   });
 
+  client.on('secureConnect', () => {
+    console.log('* client: on secureConnect');
+  });
 
   client.on('close', function() {
+    console.log('* client: on close');
+
     // readyState is deprecated but we want to make
     // sure this isn't triggering an assert in lib/net.js
     // See https://github.com/nodejs/node-v0.x-archive/issues/1069.

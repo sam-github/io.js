@@ -272,6 +272,8 @@ function runTest(port, testIndex) {
   if (tcase.renegotiate) {
     serverOptions.secureOptions =
         SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION;
+    // Renegotiation isn't supported with TLSv1.3.
+    serverOptions.maxVersion = 'TLSv1.2';
   }
 
   let renegotiated = false;
