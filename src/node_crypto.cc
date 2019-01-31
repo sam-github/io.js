@@ -1296,6 +1296,7 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
   Environment* env = wrap->env();
 
+  // XXX(sam) Move type and len check to js, and CHECK() in C++.
   if (args.Length() < 1) {
     return THROW_ERR_MISSING_ARGS(env, "Ticket keys argument is mandatory");
   }
@@ -2093,6 +2094,10 @@ void SSLWrap<Base>::GetSession(const FunctionCallbackInfo<Value>& args) {
   if (sess == nullptr)
     return;
 
+  // Don't return the session if it can't be used for resumption.
+  if (!SSL_SESSION_is_resumable(sess))
+    return;
+
   int slen = i2d_SSL_SESSION(sess, nullptr);
   CHECK_GT(slen, 0);
 
@@ -2138,6 +2143,7 @@ void SSLWrap<Base>::LoadSession(const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
 
+  // XXX(sam) check arg length and types in js, and CHECK in c++
   if (args.Length() >= 1 && Buffer::HasInstance(args[0])) {
     ssize_t slen = Buffer::Length(args[0]);
     char* sbuf = Buffer::Data(args[0]);
@@ -2539,6 +2545,8 @@ void SSLWrap<Base>::WaitForCertCb(CertCb cb, void* arg) {
 }
 
 
+// XXX TLSv1.3, ensure this is called at the right time, when servername and
+// OCSP extensions have been received
 template <class Base>
 int SSLWrap<Base>::SSLCertCallback(SSL* s, void* arg) {
   Base* w = static_cast<Base*>(SSL_get_app_data(s));

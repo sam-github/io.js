@@ -127,6 +127,8 @@ void TLSWrap::InitSSL() {
   SSL_set_mode(ssl_.get(), SSL_MODE_RELEASE_BUFFERS);
 #endif  // SSL_MODE_RELEASE_BUFFERS
 
+  SSL_set_mode(ssl_.get(), SSL_MODE_AUTO_RETRY);
+
   SSL_set_app_data(ssl_.get(), this);
   // Using InfoCallback isn't how we are supposed to check handshake progress:
   //   https://github.com/openssl/openssl/issues/7199#issuecomment-420915993
@@ -259,7 +261,13 @@ void TLSWrap::SSLInfoCallback(const SSL* ssl_, int where, int ret) {
   Context::Scope context_scope(env->context());
   Local<Object> object = c->object();
 
-  if (where & SSL_CB_HANDSHAKE_START) {
+  // Session ticket read/write triggers a info callback start/done pair...
+  // check the session state to distinguish tickets from handshakes.
+  int state = SSL_get_state(ssl_);
+  if (where & SSL_CB_HANDSHAKE_START /*&&
+      state != TLS_ST_SW_SESSION_TICKET*/) {
+    // Start is tracked to limit number and frequency of renegotiation attempts,
+    // since excessive renegotiation may be an attack.
     Local<Value> callback;
 
     if (object->Get(env->context(), env->onhandshakestart_string())
@@ -272,7 +280,10 @@ void TLSWrap::SSLInfoCallback(const SSL* ssl_, int where, int ret) {
   // SSL_CB_HANDSHAKE_START and SSL_CB_HANDSHAKE_DONE are called
   // sending HelloRequest in OpenSSL-1.1.1.
   // We need to check whether this is in a renegotiation state or not.
-  if (where & SSL_CB_HANDSHAKE_DONE && !SSL_renegotiate_pending(ssl)) {
+  // XXX do we need the pending check with patched openssl?
+  if (where & SSL_CB_HANDSHAKE_DONE &&
+      !SSL_renegotiate_pending(ssl) /* &&
+      state == TLS_ST_OK*/) {
     Local<Value> callback;
 
     c->established_ = true;
