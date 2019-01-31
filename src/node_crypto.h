@@ -146,6 +146,7 @@ class SecureContext : public BaseObject {
   static void AddCACert(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void AddCRL(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void AddRootCerts(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetCipherSuites(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetCiphers(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetECDHCurve(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetDHParam(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -153,6 +154,10 @@ class SecureContext : public BaseObject {
   static void SetSessionIdContext(
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetSessionTimeout(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetMinProtoVersion(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetMaxProtoVersion(
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Close(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void LoadPKCS12(const v8::FunctionCallbackInfo<v8::Value>& args);

@@ -347,9 +347,12 @@ void SecureContext::Initialize(Environment* env, Local<Object> target) {
   env->SetProtoMethod(t, "addCACert", AddCACert);
   env->SetProtoMethod(t, "addCRL", AddCRL);
   env->SetProtoMethod(t, "addRootCerts", AddRootCerts);
+  env->SetProtoMethod(t, "setCipherSuites", SetCipherSuites);
   env->SetProtoMethod(t, "setCiphers", SetCiphers);
   env->SetProtoMethod(t, "setECDHCurve", SetECDHCurve);
   env->SetProtoMethod(t, "setDHParam", SetDHParam);
+  env->SetProtoMethod(t, "setMaxProtoVersion", SetMaxProtoVersion);
+  env->SetProtoMethod(t, "setMinProtoVersion", SetMinProtoVersion);
   env->SetProtoMethod(t, "setOptions", SetOptions);
   env->SetProtoMethod(t, "setSessionIdContext", SetSessionIdContext);
   env->SetProtoMethod(t, "setSessionTimeout", SetSessionTimeout);
@@ -419,8 +422,8 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
 
     // Note that SSLv2 and SSLv3 are disallowed but SSLv23_method and friends
     // are still accepted.  They are OpenSSL's way of saying that all known
-    // protocols are supported unless explicitly disabled (which we do below
-    // for SSLv2 and SSLv3.)
+    // protocols below TLS 1.3 are supported unless explicitly disabled (which
+    // we do below for SSLv2 and SSLv3.)
     if (strcmp(*sslmethod, "SSLv2_method") == 0) {
       THROW_ERR_TLS_INVALID_PROTOCOL_METHOD(env, "SSLv2 methods disabled");
       return;
@@ -440,10 +443,12 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
       THROW_ERR_TLS_INVALID_PROTOCOL_METHOD(env, "SSLv3 methods disabled");
       return;
     } else if (strcmp(*sslmethod, "SSLv23_method") == 0) {
-      // noop
+      max_version = TLS1_2_VERSION;
     } else if (strcmp(*sslmethod, "SSLv23_server_method") == 0) {
+      max_version = TLS1_2_VERSION;
       method = TLS_server_method();
     } else if (strcmp(*sslmethod, "SSLv23_client_method") == 0) {
+      max_version = TLS1_2_VERSION;
       method = TLS_client_method();
     } else if (strcmp(*sslmethod, "TLS_method") == 0) {
       min_version = 0;
@@ -518,12 +523,6 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
                                  SSL_SESS_CACHE_NO_AUTO_CLEAR);
 
   SSL_CTX_set_min_proto_version(sc->ctx_.get(), min_version);
-
-  if (max_version == 0) {
-    // Selecting some secureProtocol methods allows the TLS version to be "any
-    // supported", but we don't support TLSv1.3, even if OpenSSL does.
-    max_version = TLS1_2_VERSION;
-  }
   SSL_CTX_set_max_proto_version(sc->ctx_.get(), max_version);
 
   // OpenSSL 1.1.0 changed the ticket key size, but the OpenSSL 1.0.x size was
@@ -943,40 +942,44 @@ void SecureContext::AddRootCerts(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+void SecureContext::SetCipherSuites(const FunctionCallbackInfo<Value>& args) {
+  // If TLSv1.3 is not supported, silently ignore its cipher suites.
+#ifdef TLS1_3_VERSION
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+  Environment* env = sc->env();
+  ClearErrorOnReturn clear_error_on_return;
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsString());
+
+  const node::Utf8Value ciphers(args.GetIsolate(), args[0]);
+  if (!SSL_CTX_set_ciphersuites(sc->ctx_.get(), *ciphers)) {
+    unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
+    if (!err) {
+      // XXX confirm failure with no error is possible
+      return env->ThrowError("Failed to set ciphers");
+    }
+    return ThrowCryptoError(env, err);
+  }
+#endif
+}
+
+
 void SecureContext::SetCiphers(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
   Environment* env = sc->env();
   ClearErrorOnReturn clear_error_on_return;
 
-  if (args.Length() != 1) {
-    return THROW_ERR_MISSING_ARGS(env, "Ciphers argument is mandatory");
-  }
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsString());
 
-  THROW_AND_RETURN_IF_NOT_STRING(env, args[0], "Ciphers");
-
-  // Note: set_ciphersuites() is for TLSv1.3 and was introduced in openssl
-  // 1.1.1, set_cipher_list() is for TLSv1.2 and earlier.
-  //
-  // In openssl 1.1.0, set_cipher_list() would error if it resulted in no
-  // TLSv1.2 (and earlier) cipher suites, and there is no TLSv1.3 support.
-  //
-  // In openssl 1.1.1, set_cipher_list() will not error if it results in no
-  // TLSv1.2 cipher suites if there are any TLSv1.3 cipher suites, which there
-  // are by default. There will be an error later, during the handshake, but
-  // that results in an async error event, rather than a sync error thrown,
-  // which is a semver-major change for the tls API.
-  //
-  // Since we don't currently support TLSv1.3, work around this by removing the
-  // TLSv1.3 cipher suites, so we get backwards compatible synchronous errors.
   const node::Utf8Value ciphers(args.GetIsolate(), args[0]);
-  if (
-#ifdef TLS1_3_VERSION
-      !SSL_CTX_set_ciphersuites(sc->ctx_.get(), "") ||
-#endif
-      !SSL_CTX_set_cipher_list(sc->ctx_.get(), *ciphers)) {
+  if (!SSL_CTX_set_cipher_list(sc->ctx_.get(), *ciphers)) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
     if (!err) {
+      // XXX confirm failure with no error is possible
       return env->ThrowError("Failed to set ciphers");
     }
     return ThrowCryptoError(env, err);
@@ -1044,6 +1047,34 @@ void SecureContext::SetDHParam(const FunctionCallbackInfo<Value>& args) {
 
   if (!r)
     return env->ThrowTypeError("Error setting temp DH parameter");
+}
+
+
+void SecureContext::SetMinProtoVersion(
+    const FunctionCallbackInfo<Value>& args) {
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsInt32());
+
+  int version = args[0].As<Int32>()->Value();
+
+  CHECK(SSL_CTX_set_min_proto_version(sc->ctx_.get(), version));
+}
+
+
+void SecureContext::SetMaxProtoVersion(
+    const FunctionCallbackInfo<Value>& args) {
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsInt32());
+
+  int version = args[0].As<Int32>()->Value();
+
+  CHECK(SSL_CTX_set_max_proto_version(sc->ctx_.get(), version));
 }
 
 
