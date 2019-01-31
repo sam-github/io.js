@@ -235,7 +235,7 @@ void TLSWrap::SSLInfoCallback(const SSL* ssl_, int where, int ret) {
     return;
 
   // Be compatible with older versions of OpenSSL. SSL_get_app_data() wants
-  // a non-const SSL* in OpenSSL <= 0.9.7e.
+  // a non-const SSL* in OpenSSL <= 0.9.7e. XXX probably can remove this now
   SSL* ssl = const_cast<SSL*>(ssl_);
   TLSWrap* c = static_cast<TLSWrap*>(SSL_get_app_data(ssl));
 
@@ -427,20 +427,24 @@ Local<Value> TLSWrap::GetSSLError(int status, int* err, std::string* msg) {
     case SSL_ERROR_WANT_READ:
     case SSL_ERROR_WANT_WRITE:
     case SSL_ERROR_WANT_X509_LOOKUP:
-      break;
+      return Local<Value>();
+
     case SSL_ERROR_ZERO_RETURN:
       return scope.Escape(env()->zero_return_string());
-      break;
-    default:
-      {
-        CHECK(*err == SSL_ERROR_SSL || *err == SSL_ERROR_SYSCALL);
 
+    case SSL_ERROR_SSL:
+    case SSL_ERROR_SYSCALL:
+      {
         unsigned long ssl_err = ERR_peek_error();  // NOLINT(runtime/int)
+        // HOOK hacks: if (ssl_err == 0) return Local<Value>();
+
         BIO* bio = BIO_new(BIO_s_mem());
         ERR_print_errors(bio);
 
         BUF_MEM* mem;
         BIO_get_mem_ptr(bio, &mem);
+
+        //fprintf(stderr, "   GetSSLError: %s\n", mem->data);
 
         Isolate* isolate = env()->isolate();
         Local<Context> context = isolate->GetCurrentContext();
@@ -487,8 +491,11 @@ Local<Value> TLSWrap::GetSSLError(int status, int* err, std::string* msg) {
 
         return scope.Escape(exception);
       }
+
+    default:
+      UNREACHABLE();
   }
-  return Local<Value>();
+  UNREACHABLE();
 }
 
 
@@ -890,7 +897,7 @@ void TLSWrap::SetVerifyMode(const FunctionCallbackInfo<Value>& args) {
   if (wrap->is_server()) {
     bool request_cert = args[0]->IsTrue();
     if (!request_cert) {
-      // Note reject_unauthorized ignored.
+      // If no cert is requested, there will be none to reject as unauthorized.
       verify_mode = SSL_VERIFY_NONE;
     } else {
       bool reject_unauthorized = args[1]->IsTrue();
@@ -899,7 +906,9 @@ void TLSWrap::SetVerifyMode(const FunctionCallbackInfo<Value>& args) {
         verify_mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
     }
   } else {
-    // Note request_cert and reject_unauthorized are ignored for clients.
+    // Servers always send a cert if the cipher is not anonymous (anon is
+    // disabled by default), so use VERIFY_NONE and check the cert after the
+    // handshake has completed.
     verify_mode = SSL_VERIFY_NONE;
   }
 
