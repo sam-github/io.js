@@ -803,6 +803,24 @@ void TLSWrap::EnableSessionCallbacks(
                             wrap);
 }
 
+// XXX(sam) worth adding as a feature?
+void TLSWrap::EnableTrace(
+    const FunctionCallbackInfo<Value>& args) {
+  TLSWrap* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+
+#ifndef OPENSSL_NO_SSL_TRACE
+  if (wrap->ssl_) {
+    BIO* b = BIO_new_fp(stderr,  BIO_NOCLOSE | BIO_FP_TEXT);
+    SSL_set_msg_callback(wrap->ssl_.get(), SSL_trace);
+    SSL_set_msg_callback_arg(wrap->ssl_.get(), b);
+
+    args.GetReturnValue().Set(true);
+  } else {
+    args.GetReturnValue().Set(false);
+  }
+#endif
+}
 
 void TLSWrap::DestroySSL(const FunctionCallbackInfo<Value>& args) {
   TLSWrap* wrap;
@@ -966,6 +984,7 @@ void TLSWrap::Initialize(Local<Object> target,
   env->SetProtoMethod(t, "start", Start);
   env->SetProtoMethod(t, "setVerifyMode", SetVerifyMode);
   env->SetProtoMethod(t, "enableSessionCallbacks", EnableSessionCallbacks);
+  env->SetProtoMethod(t, "enableTrace", EnableTrace);
   env->SetProtoMethod(t, "destroySSL", DestroySSL);
   env->SetProtoMethod(t, "enableCertCb", EnableCertCb);
 
