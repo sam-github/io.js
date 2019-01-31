@@ -33,6 +33,7 @@ const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
 const options = {
+  maxVersion: 'TLSv1.3', // XXX test with v1.2 and v1.3
   key: fixtures.readKey('agent2-key.pem'),
   cert: fixtures.readKey('agent2-cert.pem')
 };
@@ -65,6 +66,8 @@ server.listen(0, common.mustCall(function() {
     assert(sessionx);
     assert(session1);
     assert.strictEqual(sessionx.compare(session1), 0);
+
+    assert(session1);
 
     const opts = {
       port: server.address().port,

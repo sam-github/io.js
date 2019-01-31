@@ -29,18 +29,18 @@ connect({
     ca: client.ca,
   },
 }, function(err, pair, cleanup) {
-  console.log('client', pair.client.err);
-  console.log('server', pair.server.err);
+  console.log('*** client', pair.client.err);
+  console.log('*** server', pair.server.err);
   assert.ifError(err);
   const c = pair.client.conn;
   const s = pair.server.conn;
 
   c.write('farewell');
   s.on('data', common.mustCall((d) => {
-    console.log('S: %s', d)
+    console.log('*** S: %s', d)
   }));
   c.on('data', common.mustCall((d) => {
-    console.log('C: %s', d);
+    console.log('*** C: %s', d);
     return cleanup();
   }));
 });

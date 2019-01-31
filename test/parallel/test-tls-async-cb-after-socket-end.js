@@ -10,12 +10,17 @@ const tls = require('tls');
 // the tls socket is destroyed. Disable TLS ticket support to force the legacy
 // session resumption mechanism to be used.
 
+// Test does not apply to TLS1.3. TLS1.3 supports only tickets, not sessions,
+// so the new and resume session events will never be emitted on the server.
+tls.DEFAULT_MAX_VERSION = 'TLSv1.2';
+
 const options = {
   maxVersion: 'TLSv1.2',
   secureOptions: SSL_OP_NO_TICKET,
   key: fixtures.readSync('test_key.pem'),
   cert: fixtures.readSync('test_cert.pem')
 };
+
 
 const server = tls.createServer(options, common.mustCall());
 
@@ -28,6 +33,8 @@ server.on('newSession', common.mustCall((key, session, done) => {
 
 server.on('resumeSession', common.mustCall((id, cb) => {
   sessionCb = cb;
+  // Destroy the client and then call the session cb, to check that the cb
+  // doesn't explode when called after the handle has been destroyed.
   next();
 }));
 

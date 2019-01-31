@@ -100,6 +100,7 @@ function start(callback) {
       rejectUnauthorized: false
     }, function() {
       sess = sess || s.getSession();
+      // XXX this has to use async newSession client side API
       ticketLog.push(s.getTLSTicket().toString('hex'));
     });
     s.on('close', function() {

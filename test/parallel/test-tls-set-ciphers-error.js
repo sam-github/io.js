@@ -8,6 +8,7 @@ const assert = require('assert');
 const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
+// XXX requires error on empty cipher list
 {
   const options = {
     key: fixtures.readKey('agent2-key.pem'),
