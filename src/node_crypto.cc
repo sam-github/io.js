@@ -1518,6 +1518,10 @@ int SSLWrap<Base>::NewSessionCallback(SSL* s, SSL_SESSION* sess) {
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
 
+  fprintf(stderr, "%s SSLWrap::NewSessionCallback() callbacks? %d\n",
+      w->is_server() ?  "server" : "client",
+      w->session_callbacks_);
+
   if (!w->session_callbacks_)
     return 0;
 
