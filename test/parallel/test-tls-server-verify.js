@@ -272,6 +272,8 @@ function runTest(port, testIndex) {
   if (tcase.renegotiate) {
     serverOptions.secureOptions =
         SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION;
+    // Renegotiation is a protocol feature only for TLS1.2 and below.
+    serverOptions.maxVersion = 'TLSv1.2';
   }
 
   let renegotiated = false;

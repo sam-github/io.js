@@ -76,7 +76,11 @@ connect({
     requestCert: true,
   },
 }, function(err, pair, cleanup) {
-  assert.strictEqual(err.code, 'ECONNRESET');
+  if (err.code === 'ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED')
+    err.code = 'ERR_SSL_PEER_DID_NOT_RETURN_A_CERTIFICATE';
+  if (err.code === 'ECONNRESET')  // happens with max default at 1.2, XXX why?
+    err.code = 'ERR_SSL_PEER_DID_NOT_RETURN_A_CERTIFICATE';
+  assert.strictEqual(err.code, 'ERR_SSL_PEER_DID_NOT_RETURN_A_CERTIFICATE');
   return cleanup();
 });
 

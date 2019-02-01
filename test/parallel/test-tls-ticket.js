@@ -100,7 +100,7 @@ function start(callback) {
       rejectUnauthorized: false
     }, function() {
       sess = sess || s.getSession();
-      ticketLog.push(s.getTLSTicket().toString('hex'));
+      // ticketLog.push(s.getTLSTicket().toString('hex'));
     });
     s.on('close', function() {
       if (--left === 0)
@@ -109,6 +109,7 @@ function start(callback) {
         connect();
     });
     s.once('session', (session) => onNewSession(s, session));
+    s.once('session', () => ticketLog.push(s.getTLSTicket().toString('hex')));
   }
 
   connect();

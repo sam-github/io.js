@@ -55,7 +55,7 @@ server.listen(0, common.mustCall(function() {
                   '\r\n');
   }));
 
-  client1.on('session', common.mustCall((session) => {
+  client1.once('session', common.mustCall((session) => {
     console.log('session');
 
     const opts = {

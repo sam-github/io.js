@@ -1327,6 +1327,7 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
   Environment* env = wrap->env();
 
+  // XXX(sam) Move type and len check to js, and CHECK() in C++.
   if (args.Length() < 1) {
     return THROW_ERR_MISSING_ARGS(env, "Ticket keys argument is mandatory");
   }
@@ -2201,6 +2202,7 @@ void SSLWrap<Base>::LoadSession(const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
 
+  // XXX(sam) check arg length and types in js, and CHECK in c++
   if (args.Length() >= 1 && Buffer::HasInstance(args[0])) {
     ssize_t slen = Buffer::Length(args[0]);
     char* sbuf = Buffer::Data(args[0]);
@@ -2331,6 +2333,7 @@ void SSLWrap<Base>::GetEphemeralKeyInfo(
       case EVP_PKEY_EC:
       // TODO(shigeki) Change this to EVP_PKEY_X25519 and add EVP_PKEY_X448
       // after upgrading to 1.1.1.
+      // XXX figure out what shigeki means, and do it
       case NID_X25519:
         {
           const char* curve_name;
@@ -2352,9 +2355,12 @@ void SSLWrap<Base>::GetEphemeralKeyInfo(
                                  EVP_PKEY_bits(key))).FromJust();
         }
         break;
+      default:
+        UNREACHABLE(); // XXX @shigeki - true? Only EC and DH for ephemeral?
     }
     EVP_PKEY_free(key);
   }
+  // XXX(sam) semver-major: else return ThrowCryptoError(env, ERR_get_error())
 
   return args.GetReturnValue().Set(info);
 }
@@ -2570,7 +2576,10 @@ int SSLWrap<Base>::TLSExtStatusCallback(SSL* s, void* arg) {
 
     w->MakeCallback(env->onocspresponse_string(), 1, &arg);
 
-    // Somehow, client is expecting different return value here
+    // No async acceptance is possible, so always return 1 to accept the
+    // response.  The listener for 'OCSPResponse' event has no control over
+    // return value, but it can .destroy() the connection if the response is not
+    // acceptable.
     return 1;
   } else {
     // Outgoing response
@@ -2602,6 +2611,8 @@ void SSLWrap<Base>::WaitForCertCb(CertCb cb, void* arg) {
 }
 
 
+// XXX TLSv1.3, ensure this is called at the right time, when servername and
+// OCSP extensions have been received
 template <class Base>
 int SSLWrap<Base>::SSLCertCallback(SSL* s, void* arg) {
   Base* w = static_cast<Base*>(SSL_get_app_data(s));
@@ -2613,6 +2624,8 @@ int SSLWrap<Base>::SSLCertCallback(SSL* s, void* arg) {
     return 1;
 
   if (w->cert_cb_running_)
+    // Not an error. Suspend handshake with SSL_ERROR_WANT_X509_LOOKUP, and
+    // handshake will continue after certcb is done.
     return -1;
 
   Environment* env = w->env();
@@ -2688,6 +2701,8 @@ void SSLWrap<Base>::CertCbDone(const FunctionCallbackInfo<Value>& args) {
     if (rv)
       rv = w->SetCACerts(sc);
     if (!rv) {
+      // XXX(sam) not clear why sometimes we throw error, and sometimes we call
+      // onerror(). Both cause .destroy(), but onerror does a bit more.
       unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
       if (!err)
         return env->ThrowError("CertCbDone");

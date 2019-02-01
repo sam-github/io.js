@@ -60,7 +60,9 @@ function test(testOptions, cb) {
   }
 
   const server = tls.createServer(options, function(cleartext) {
+    console.log('server on secureConnection');
     cleartext.on('error', function(er) {
+      console.log('server on err', err.code);
       // We're ok with getting ECONNRESET in this test, but it's
       // timing-dependent, and thus unreliable. Any other errors
       // are just failures, though.
@@ -71,17 +73,20 @@ function test(testOptions, cb) {
     cleartext.end();
   });
   server.on('OCSPRequest', function(cert, issuer, callback) {
+    console.log('server on OCSPRequest');
     ++ocspCount;
     assert.ok(Buffer.isBuffer(cert));
     assert.ok(Buffer.isBuffer(issuer));
 
     // Just to check that async really works there
     setTimeout(function() {
+      console.log('server OCSPRequest done: %j', testOptions.response);
       callback(null,
                testOptions.response ? Buffer.from(testOptions.response) : null);
     }, 100);
   });
   server.listen(0, function() {
+    console.log('client connect, with OCSP?', testOptions.ocsp !== false);
     const client = tls.connect({
       port: this.address().port,
       requestOCSP: testOptions.ocsp !== false,
@@ -89,14 +94,17 @@ function test(testOptions, cb) {
         SSL_OP_NO_TICKET : 0,
       rejectUnauthorized: false
     }, function() {
+      console.log('client on secureConnect');
       clientSecure++;
     });
     client.on('OCSPResponse', function(resp) {
+      console.log('client on OCSPResponse: <%s>', resp, resp ? 'destroy!' : '');
       ocspResponse = resp;
       if (resp)
         client.destroy();
     });
-    client.on('close', function() {
+    client.on('close', function(err) {
+      console.log('client on close, err?', err);
       server.close(cb);
     });
   });

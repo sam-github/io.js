@@ -15,6 +15,10 @@ const { checkInvocations } = require('./hook-checks');
 const hooks = initHooks();
 hooks.enable();
 
+// XXX assumes server handshake completes before client, true for 1.2, not
+// for 1.3. Rewrite for 1.3.
+tls.DEFAULT_MAX_VERSION = 'TLSv1.2';
+
 //
 // Creating server and listening on port
 //

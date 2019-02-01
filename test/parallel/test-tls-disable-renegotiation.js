@@ -10,6 +10,9 @@ if (!common.hasCrypto)
 
 const tls = require('tls');
 
+// Renegotiation as a protocol feature was dropped after TLS1.2.
+tls.DEFAULT_MAX_VERSION = 'TLSv1.2';
+
 const options = {
   key: fixtures.readKey('agent1-key.pem'),
   cert: fixtures.readKey('agent1-cert.pem'),
@@ -17,6 +20,7 @@ const options = {
 
 const server = tls.Server(options, common.mustCall((socket) => {
   socket.on('error', common.mustCall((err) => {
+    console.log('server on error: %s', err.code);
     common.expectsError({
       type: Error,
       code: 'ERR_TLS_RENEGOTIATION_DISABLED',
@@ -29,10 +33,13 @@ const server = tls.Server(options, common.mustCall((socket) => {
   // Demonstrates that renegotiation works successfully up until
   // disableRenegotiation is called.
   socket.on('data', common.mustCall((chunk) => {
+    console.log('server on data <%s>', chunk);
+    console.log('server disabling renegotiation');
     socket.write(chunk);
     socket.disableRenegotiation();
   }));
   socket.on('secure', common.mustCall(() => {
+    console.log('server on secure', socket._handle.handshakes);
     assert(socket._handle.handshakes < 2,
            `Too many handshakes [${socket._handle.handshakes}]`);
   }));
@@ -88,5 +95,11 @@ server.listen(0, common.mustCall(() => {
       }));
     }));
     assert.strictEqual(ok, true);
+    client.on('secureConnect', common.mustCall(() => {
+      console.log('client on secureConnect');
+    }, 1));
+    client.on('secure', common.mustCall(() => {
+      console.log('client on secure');
+    }, 1));
   }));
 }));

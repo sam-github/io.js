@@ -7,6 +7,12 @@ const fixtures = require('../common/fixtures');
 const {
   assert, connect, keys, tls
 } = require(fixtures.path('tls-connect'));
+// XXX test all combinations of
+//   min 1/1.1/1.2/1.3
+//   max 1.2/1.3
+// XXX add tests specific to TLSv1.3.. there are none ATM
+tls.DEFAULT_MIN_VERSION = 'TLSv1.2';
+tls.DEFAULT_MAX_VERSION = 'TLSv1.3';
 const DEFAULT_MIN_VERSION = tls.DEFAULT_MIN_VERSION;
 const DEFAULT_MAX_VERSION = tls.DEFAULT_MAX_VERSION;
 
@@ -64,8 +70,8 @@ function test(cmin, cmax, cprot, smin, smax, sprot, proto, cerr, serr) {
 
 const U = undefined;
 
-// Default protocol is TLSv1.2.
-test(U, U, U, U, U, U, 'TLSv1.2');
+// Default protocol is the max version.
+test(U, U, U, U, U, U, DEFAULT_MAX_VERSION);
 
 // Insecure or invalid protocols cannot be enabled.
 test(U, U, U, U, U, 'SSLv2_method',
@@ -147,9 +153,13 @@ if (DEFAULT_MIN_VERSION === 'TLSv1.2') {
     test(U, U, U, U, U, 'TLSv1_1_method',
          U, 'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_WRONG_VERSION_NUMBER');
     test(U, U, U, U, U, 'TLSv1_method',
-         U, 'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_WRONG_VERSION_NUMBER');
+         U, 'ECONNRESET', 'ERR_SSL_UNSUPPORTED_PROTOCOL');
   } else {
-    assert(false, 'unreachable');
+    // TLS1.3 client hellos are are not understood by TLS1.1 or below.
+    test(U, U, U, U, U, 'TLSv1_1_method',
+      U, 'ECONNRESET', 'ERR_SSL_UNSUPPORTED_PROTOCOL');
+    test(U, U, U, U, U, 'TLSv1_method',
+      U, 'ECONNRESET', 'ERR_SSL_UNSUPPORTED_PROTOCOL');
   }
 }
 
@@ -164,7 +174,9 @@ if (DEFAULT_MIN_VERSION === 'TLSv1.1') {
     test(U, U, U, U, U, 'TLSv1_method',
          U, 'ERR_SSL_UNSUPPORTED_PROTOCOL', 'ERR_SSL_WRONG_VERSION_NUMBER');
   } else {
-    assert(false, 'unreachable');
+    // TLS1.3 client hellos are are not understood by TLS1.1 or below.
+    test(U, U, U, U, U, 'TLSv1_method',
+      U, 'ECONNRESET', 'ERR_SSL_UNSUPPORTED_PROTOCOL');
   }
 }
 

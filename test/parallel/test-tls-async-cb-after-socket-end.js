@@ -14,7 +14,6 @@ const tls = require('tls');
 // new and resume session events will never be emitted on the server.
 
 const options = {
-  maxVersion: 'TLSv1.2',
   secureOptions: SSL_OP_NO_TICKET,
   key: fixtures.readSync('test_key.pem'),
   cert: fixtures.readSync('test_cert.pem')
@@ -38,6 +37,7 @@ server.on('resumeSession', common.mustCall((id, cb) => {
 
 server.listen(0, common.mustCall(() => {
   const clientOpts = {
+    maxVersion: 'TLSv1.2', // XXX trace this so I know why this must change
     port: server.address().port,
     rejectUnauthorized: false,
     session: false
