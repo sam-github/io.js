@@ -39,37 +39,80 @@ const options = {
 
 // create server
 const server = tls.Server(options, common.mustCall((socket) => {
-  socket.end('Goodbye');
+  // XXX .end() causes a close_notify record before the two new ticket
+  // records... so the latter never arrive.
+  // socket.end('Goodbye');
+
+  // XXX some other parts of the test have been updated to work better with
+  // TLSv1.3, so work-around above problem to show that
+  socket.write('Goodbye');
+  socket.on('data', (data) => {
+    console.log('server on <%s>', data);
+    socket.destroy();
+  });
 }, 2));
 
 // start listening
 server.listen(0, common.mustCall(function() {
-
   let sessionx = null;
   let session1 = null;
+  let sessions = 0;
+  let tls13;
   const client1 = tls.connect({
     port: this.address().port,
     rejectUnauthorized: false
   }, common.mustCall(() => {
-    console.log('connect1');
+    console.log('connect1', client1.getProtocol());
+    tls13 = client1.getProtocol() === 'TLSv1.3';
     assert.strictEqual(client1.isSessionReused(), false);
     sessionx = client1.getSession();
+    assert(sessionx);
+
+    if (session1)
+      reconnect();
   }));
+
+  client1.on('data', (d) => {
+    console.log('data1', d.toString());
+    // XXX can't .end() here, either, because it closes between the close_notify
+    // and the 2 new tickets... so affect is the same: no session events :-(
+    // work-around: ounce a msg back the server, and let it close.
+    client1.write('bye');
+  });
 
   client1.once('session', common.mustCall((session) => {
     console.log('session1');
     session1 = session;
+    assert(session1);
+    if (sessionx)
+      reconnect();
   }));
 
-  client1.on('close', common.mustCall(() => {
+  client1.on('session', () => {
+    console.log('client1 session#', ++sessions);
+  });
+
+  client1.on('close', () => {
+    console.log('client1 close');
+    assert.strictEqual(sessions, tls13 ? 2 : 1);
+  });
+
+  function reconnect() {
     assert(sessionx);
     assert(session1);
-    assert.strictEqual(sessionx.compare(session1), 0);
+    if(tls13)
+      // For TLS1.3, the session immediately after handshake is a dummy,
+      // unresumable session. The one delivered later in session event is
+      // resumable.
+      assert.notStrictEqual(sessionx.compare(session1), 0);
+    else
+      // For TLS12, they are identical.
+      assert.strictEqual(sessionx.compare(session1), 0);
 
     const opts = {
       port: server.address().port,
       rejectUnauthorized: false,
-      session: session1
+      session: session1,
     };
 
     const client2 = tls.connect(opts, common.mustCall(() => {
@@ -77,13 +120,18 @@ server.listen(0, common.mustCall(function() {
       assert.strictEqual(client2.isSessionReused(), true);
     }));
 
+    client2.on('data', (d) => {
+      console.log('data2', d.toString());
+      client2.end();
+    });
+
     client2.on('close', common.mustCall(() => {
       console.log('close2');
       server.close();
     }));
 
     client2.resume();
-  }));
+  }
 
   client1.resume();
 }));

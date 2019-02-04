@@ -1,6 +1,5 @@
 test/parallel/test-http2-https-fallback
 test/parallel/test-https-eof-for-eom
-test/parallel/test-tls-client-resume
 test/parallel/test-tls-client-verify
 test/parallel/test-tls-connect-given-socket
 test/parallel/test-tls-destroy-stream
