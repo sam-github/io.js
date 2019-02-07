@@ -49,7 +49,18 @@ function createServer() {
     ticketKeys: keys
   }, function(c) {
     serverLog.push(id);
-    c.write('x');
+    c.write('x', () => {
+      // XXX this is never called
+      console.log('server on write cb');
+      c.enableTrace();
+    });
+    c.on('end', () => {
+      console.log('server on end');
+      c.enableTrace();
+      // XXX DoShutdown() never seems be called, maybe because
+      // write(), above, is not complete?
+      c.end();
+    });
 
     counter++;
 
@@ -132,9 +143,12 @@ function start(callback) {
         ticketLog.push(s.getTLSTicket().toString('hex'));
     });
     s.on('data', () => {
+      console.log('client %d: on data, do .end()', s.localPort);
       s.end();
     });
     s.on('close', function() {
+      // XXX never happens, because server's .end() doesn't work
+      console.log('client %d: on close', s.localPort);
       if (--left === 0)
         callback();
       else

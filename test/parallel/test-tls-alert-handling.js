@@ -40,11 +40,21 @@ const errorHandler = common.mustCall((err) => {
     server.close();
 });
 const server = tls.createServer(opts, common.mustCall(function(s) {
-  s.pipe(s);
+  console.log('server on secureConnection');
+  //s.enableTrace();
+  //s.pipe(s);
+  s.on('data', (data) => {
+    console.log('server on data <%s>', data);
+    s.write(data, () => console.log('server on wrote <%s>', data));
+  });
   s.on('error', errorHandler);
+  s.on('error', (err) => {
+    console.log('server on error', err.code);
+  });
 }, 2));
 
 server.listen(0, common.mustCall(function() {
+  console.log('server on listen');
   sendClient();
 }));
 
@@ -56,7 +66,12 @@ function sendClient() {
   const client = tls.connect(server.address().port, {
     rejectUnauthorized: false
   });
-  client.on('data', common.mustCall(function() {
+  client.enableTrace();
+  client.on('secureConnect', () => {
+    console.log('client on secureConnect');
+  });
+  client.on('data', common.mustCall(function(data) {
+    console.log('client on data <%s> iter %d', data, iter+1);
     if (iter++ === 2) sendBADTLSRecord();
     if (iter < max_iter) {
       client.write('a');
@@ -64,9 +79,12 @@ function sendClient() {
     }
     client.end();
   }, max_iter));
-  client.write('a');
+  client.write('a', () => {
+    console.log('client on wrote "a"');
+  });
   client.on('error', common.mustNotCall());
   client.on('close', common.mustCall(function() {
+    console.log('client on close');
     clientClosed = true;
     if (canCloseServer())
       server.close();

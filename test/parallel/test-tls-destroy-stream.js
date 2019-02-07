@@ -9,8 +9,6 @@ const net = require('net');
 const assert = require('assert');
 const tls = require('tls');
 
-// XXX some kind of subtle stream bug/interaction causes this to fail only with
-// 1.3
 tls.DEFAULT_MAX_VERSION = 'TLSv1.3';
 
 // This test ensures that an instance of StreamWrap should emit "end" and
@@ -26,8 +24,17 @@ const tlsServer = tls.createServer(
   },
   (socket) => {
     console.log('tls server connection');
-    //socket.on('error', common.mustNotCall(console.log));
+    socket.on('error', (err) => console.trace('server:', err));
     socket.on('close', common.mustCall());
+    if(0) {
+    socket.write(CONTENT, () => {
+      socket.destroy(new Error('hi, sam'));
+    });
+    return;
+    }
+    // XXX destroy() tears down socket before CONTENT gets flushed. probably
+    // because of key update messages... confirm this with tracing. Is it
+    // a bug in the test?
     socket.write(CONTENT);
     socket.destroy();
   },

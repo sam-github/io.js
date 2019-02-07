@@ -33,11 +33,22 @@ const fixtures = require('../common/fixtures');
 let received = '';
 
 const server = tls.createServer({
+  maxVersion: 'TLSv1.3',
   key: fixtures.readKey('agent1-key.pem'),
   cert: fixtures.readKey('agent1-cert.pem')
 }, common.mustCall(function(c) {
   c.write('hello ', null, common.mustCall(function() {
     c.write('world!', null, common.mustCall(function() {
+      // XXX .end() works here... because it is guaranteed serialized with
+      // preceeding .write()s. But .destroy()... why should it be serialized?
+      // Won't .destroy() rip down the stream, and be expected to discard any
+      // pending data?
+      //
+      // But if so... is it a bug that there is pending data, or just natural
+      // because after TLS 1.3 handshake is complete, internal key update
+      // messages are still being flushed?
+      //
+      // return c.end();
       c.destroy();
     }));
     // Data on next _write() will be written, and the cb will still be invoked
@@ -50,6 +61,7 @@ const server = tls.createServer({
     rejectUnauthorized: false
   }, common.mustCall(function() {
     c.on('data', function(chunk) {
+      process._rawDebug('client got chunk <%s>', chunk);
       received += chunk;
     });
     c.on('end', common.mustCall(function() {
