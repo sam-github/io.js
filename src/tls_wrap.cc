@@ -125,11 +125,13 @@ void TLSWrap::InitSSL() {
   SSL_set_mode(ssl_.get(), SSL_MODE_RELEASE_BUFFERS);
 #endif  // SSL_MODE_RELEASE_BUFFERS
 
-  // XXX  Revert 1.1.1 change that made this the default? Its not clear if it
-  // matters. Notes suggest that this is a work-around for common misuses of
-  // OpenSSL read API related to select()... not clear if it effects our code.
+  // SSL_MODE_AUTO_RETRY is a work-around for common misuses of OpenSSL read API
   // - https://wiki.openssl.org/index.php/TLS1.3#Non-application_data_records
-  //SSL_clear_mode(ssl_.get(), SSL_MODE_AUTO_RETRY);
+  // XXX 1.1.1 made this mode default. node used to work without it, so in
+  // theory should work if we clear it. Get subtly different test failures with
+  // or without the mode, but by reworking Cycle(), it should not be necessary
+  // for OpenSSL to auto retry.
+  SSL_clear_mode(ssl_.get(), SSL_MODE_AUTO_RETRY);
 
   SSL_set_app_data(ssl_.get(), this);
   // Using InfoCallback isn't how we are supposed to check handshake progress:
@@ -877,7 +879,16 @@ void TLSWrap::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   }
 
   // Cycle OpenSSL's state
-  Cycle();
+  size_t before = 0;
+  size_t after = 0;
+  do {
+    before = enc_in->ReadPending();
+    fprintf(stderr, "...OnStreamRead, before Cycle(), pending %d\n", (int)before);
+    Cycle();
+    after = enc_in->ReadPending();
+    fprintf(stderr, "...OnStreamRead, after Cycle(), pending %d\n", (int)after);
+    // Keep cycling as long as progress is being made 
+  } while(after && after < before);
 }
 
 

@@ -135,6 +135,24 @@ size_t NodeBIO::PeekMultiple(char** out, size_t* size, size_t* count) {
 }
 
 
+size_t NodeBIO::ReadPending() {
+  Buffer* pos = read_head_;
+  size_t total = 0;
+
+  while (pos) {
+    total += pos->write_pos_ - pos->read_pos_;
+
+    /* Don't get past write head */
+    if (pos == write_head_)
+      break;
+    else
+      pos = pos->next_;
+  }
+
+  return total;
+}
+
+
 int NodeBIO::Write(BIO* bio, const char* data, int len) {
   BIO_clear_retry_flags(bio);
 

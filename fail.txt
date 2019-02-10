@@ -17,6 +17,7 @@ test/parallel/test-tls-peer-certificate-multi-keys
 test/parallel/test-tls-securepair-server
 test/parallel/test-tls-server-connection-server
 test/parallel/test-tls-set-encoding
+test/parallel/test-tls-socket-destroy
 test/parallel/test-tls-ticket
 test/parallel/test-tls-ticket-cluster
 test/parallel/test-tls-tlswrap-segfault
