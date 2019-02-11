@@ -131,7 +131,7 @@ void TLSWrap::InitSSL() {
   // theory should work if we clear it. Get subtly different test failures with
   // or without the mode, but by reworking Cycle(), it should not be necessary
   // for OpenSSL to auto retry.
-  SSL_clear_mode(ssl_.get(), SSL_MODE_AUTO_RETRY);
+  //SSL_clear_mode(ssl_.get(), SSL_MODE_AUTO_RETRY);
 
   SSL_set_app_data(ssl_.get(), this);
   // Using InfoCallback isn't how we are supposed to check handshake progress:
@@ -879,6 +879,11 @@ void TLSWrap::OnStreamRead(ssize_t nread, const uv_buf_t& buf) {
   }
 
   // Cycle OpenSSL's state
+  Cycle();
+  return;
+
+  // XXX Alternative to SSL_MODE_AUTO_RETRY, but doesn't cause any fails to pass,
+  // and causes test/parallel/test-tls-socket-destroy to fail
   size_t before = 0;
   size_t after = 0;
   do {
