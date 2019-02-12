@@ -214,6 +214,8 @@ class StreamResource {
   // Return 0 for success and a libuv error code for failures.
   virtual int DoTryWrite(uv_buf_t** bufs, size_t* count);
   // Perform a write of data, and either call req_wrap->Done() when finished
+  //      call when? can we call sync? "call Done() and return" suggests
+  //      first Done, then return, but probably not right
   // and return 0, or return a libuv error code for synchronous failures.
   virtual int DoWrite(WriteWrap* w,
                       uv_buf_t* bufs,

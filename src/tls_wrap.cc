@@ -92,6 +92,7 @@ bool TLSWrap::InvokeQueued(int status, const char* error_str) {
     return false;
 
   if (current_write_ != nullptr) {
+    CHECK(!in_dowrite_);
     WriteWrap* w = current_write_;
     current_write_ = nullptr;
     w->Done(status, error_str);
@@ -340,8 +341,23 @@ void TLSWrap::EncOut() {
 
   // No encrypted output ready to write to the underlying stream.
   if (BIO_pending(enc_out_) == 0) {
-    if (pending_cleartext_input_.empty())
-      InvokeQueued(0);
+    if (pending_cleartext_input_.empty()) {
+      if (!in_dowrite_) {
+        InvokeQueued(0);
+      } else {
+        // XXX if we are in_dowrite_, then SSL_write wrote some appdata.
+        // If we are here, nothing was flushed to enc_out_.
+        // calling Done() in the next tick "works", but since the write is
+        // not flushed, it seems its too soon. Just returning and letting
+        // the next EncOut() call Done() seems the right thing, but in the
+        // absence of any docs or comments on how the streams are supposed
+        // to work, I'm not sure what to do. The tests don't care either way.
+        // return;  // comment in, or out, no difference to the unit tests.
+        env()->SetImmediate([](Environment* env, void* data) {
+            static_cast<TLSWrap*>(data)->InvokeQueued(0);
+            }, this, object());
+      }
+    }
     return;
   }
 
@@ -719,6 +735,7 @@ void TLSWrap::ClearError() {
 
 
 // Called by StreamBase::Write() to request async write of clear text into SSL.
+// XXX Should there be a TLSWrap::DoTryWrite()?
 int TLSWrap::DoWrite(WriteWrap* w,
                      uv_buf_t* bufs,
                      size_t count,
@@ -814,7 +831,10 @@ int TLSWrap::DoWrite(WriteWrap* w,
   }
 
   // Write any encrypted/handshake output that may be ready.
+  // XXX WIP ... guard against sync `w (aka current_write_)->Done()`
+  in_dowrite_ = true;
   EncOut();
+  in_dowrite_ = false;
 
   fprintf(stderr, "...TLSWrap::DoWrite()\n");
   return 0;
