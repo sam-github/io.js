@@ -208,6 +208,13 @@ class StreamResource {
   // Return 0 for success and a libuv error code for failures.
   virtual int DoTryWrite(uv_buf_t** bufs, size_t* count);
   // Perform a write of data, and either call req_wrap->Done() when finished
+  //   XXX call when? can we call sync? "call Done() and return" suggests first
+  //   Done(), then return, but that fails with TLSWrap.
+  //   See writeGeneric() in stream_base_commons.js:
+  //      What happens if Done() is called before return is that onwritecomplete
+  //      gets called sync inside handlWriteReq(), BEFORE afterWriteDispatched()
+  //      is called, but that means it happens before afterWriteDispatched()
+  //      sets req.callback = cb, so the cb never gets called.
   // and return 0, or return a libuv error code for synchronous failures.
   virtual int DoWrite(WriteWrap* w,
                       uv_buf_t* bufs,

@@ -93,6 +93,7 @@ bool TLSWrap::InvokeQueued(int status, const char* error_str) {
     return false;
 
   if (current_write_ != nullptr) {
+    CHECK(!in_dowrite_);
     WriteWrap* w = current_write_;
     current_write_ = nullptr;
     w->Done(status, error_str);
