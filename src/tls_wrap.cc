@@ -347,6 +347,14 @@ void TLSWrap::EncOut() {
       if (!in_dowrite_) {
         InvokeQueued(0);
       } else {
+        // XXX if we are in_dowrite_, then SSL_write wrote some appdata.
+        // If we are here, nothing was flushed to enc_out_.
+        // calling Done() in the next tick "works", but since the write is
+        // not flushed, it seems its too soon. Just returning and letting
+        // the next EncOut() call Done() seems the right thing, but in the
+        // absence of any docs or comments on how the streams are supposed
+        // to work, I'm not sure what to do. The tests don't care either way.
+        // return;  // comment in, or out, no difference to the unit tests.
         env()->SetImmediate([](Environment* env, void* data) {
             static_cast<TLSWrap*>(data)->InvokeQueued(0);
             }, this, object());
