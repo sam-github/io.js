@@ -39,6 +39,7 @@ namespace crypto {
 
 
 BIOPointer NodeBIO::New(Environment* env) {
+  // XXX const_cast not needed with 1.1.0 and later, is 1.0.0 needed?
   // The const_cast doesn't violate const correctness.  OpenSSL's usage of
   // BIO_METHOD is effectively const but BIO_new() takes a non-const argument.
   BIOPointer bio(BIO_new(const_cast<BIO_METHOD*>(GetMethod())));
@@ -137,6 +138,8 @@ size_t NodeBIO::PeekMultiple(char** out, size_t* size, size_t* count) {
 
 int NodeBIO::Write(BIO* bio, const char* data, int len) {
   BIO_clear_retry_flags(bio);
+
+  fprintf(stderr, "NodeBIO::Write(len %d)\n", len);
 
   FromBIO(bio)->Write(data, len);
 

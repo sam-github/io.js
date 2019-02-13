@@ -2729,6 +2729,9 @@ void SSLWrap<Base>::CertCbDone(const FunctionCallbackInfo<Value>& args) {
 
 template <class Base>
 void SSLWrap<Base>::DestroySSL() {
+  fprintf(stderr, "%s SSLWrap::DestroySSL() ssl? %d\n",
+      is_server() ? "server" : "client", !!ssl_);
+
   if (!ssl_)
     return;
 

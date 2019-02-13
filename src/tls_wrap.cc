@@ -29,7 +29,7 @@
 #include "stream_base-inl.h"
 #include "util-inl.h"
 
-#if 1
+#if 0
 #define fprintf(...)
 #endif
 
