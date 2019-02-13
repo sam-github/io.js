@@ -941,6 +941,11 @@ void SecureContext::AddRootCerts(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+#if 1
+#define fprintf(...)
+#endif
+
+
 void SecureContext::SetCipherSuites(const FunctionCallbackInfo<Value>& args) {
 #ifdef TLS1_3_VERSION
   SecureContext* sc;
@@ -1332,6 +1337,12 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
   memcpy(wrap->ticket_key_hmac_, Buffer::Data(args[0]) + 16, 16);
   memcpy(wrap->ticket_key_aes_, Buffer::Data(args[0]) + 32, 16);
 
+  fprintf(stderr, "SetTicketKeys %02x%02x%02x%02x\n",
+      wrap->ticket_key_name_[0],
+      wrap->ticket_key_name_[1],
+      wrap->ticket_key_name_[2],
+      wrap->ticket_key_name_[3]);
+
   args.GetReturnValue().Set(true);
 #endif  // !def(OPENSSL_NO_TLSEXT) && def(SSL_CTX_get_tlsext_ticket_keys)
 }
@@ -1451,6 +1462,9 @@ int SecureContext::TicketCompatibilityCallback(SSL* ssl,
 
   if (enc) {
     memcpy(name, sc->ticket_key_name_, sizeof(sc->ticket_key_name_));
+    fprintf(stderr, "TicketKeyCallback() issue name %02x%02x%02x%02x\n",
+        name[0], name[1], name[2], name[3]);
+
     if (RAND_bytes(iv, 16) <= 0 ||
         EVP_EncryptInit_ex(ectx, EVP_aes_128_cbc(), nullptr,
                            sc->ticket_key_aes_, iv) <= 0 ||
@@ -1460,6 +1474,13 @@ int SecureContext::TicketCompatibilityCallback(SSL* ssl,
     }
     return 1;
   }
+
+  fprintf(stderr, "TicketKeyCallback() reuse name %02x%02x%02x%02x"
+      " with %02x%02x%02x%02x, match? %d\n",
+      name[0], name[1], name[2], name[3],
+      sc->ticket_key_name_[0], sc->ticket_key_name_[1],
+      sc->ticket_key_name_[2], sc->ticket_key_name_[3],
+      0 == memcmp(name, sc->ticket_key_name_, sizeof(sc->ticket_key_name_)));
 
   if (memcmp(name, sc->ticket_key_name_, sizeof(sc->ticket_key_name_)) != 0) {
     // The ticket key name does not match. Discard the ticket.
@@ -1569,6 +1590,9 @@ int SSLWrap<Base>::NewSessionCallback(SSL* s, SSL_SESSION* sess) {
   Environment* env = w->ssl_env();
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
+
+  fprintf(stderr, "%s SSLWrap::NewSessionCallback() enabled? %d\n",
+      w->is_server() ? "server" : "client", w->session_callbacks_);
 
   if (!w->session_callbacks_)
     return 0;
@@ -6269,6 +6293,10 @@ void TimingSafeEqual(const FunctionCallbackInfo<Value>& args) {
 
   return args.GetReturnValue().Set(CRYPTO_memcmp(buf1, buf2, buf_length) == 0);
 }
+
+#ifdef fprintf
+#undef fprintf
+#endif
 
 void InitCryptoOnce() {
   SSL_load_error_strings();
