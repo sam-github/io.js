@@ -33,13 +33,17 @@ const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
 const options = {
+  enableTrace: true,
   key: fixtures.readKey('agent2-key.pem'),
   cert: fixtures.readKey('agent2-cert.pem')
 };
 
 // create server
 const server = tls.Server(options, common.mustCall((socket) => {
-  socket.end('Goodbye');
+  // XXX a data-less end is needed to trigger the close_notify, followed
+  // by the NewSessionTicket records (which don't get read).
+  // socket.end('Goodbye');
+  socket.end();
 }, 2));
 
 // start listening
@@ -61,6 +65,7 @@ server.listen(0, common.mustCall(function() {
     if (session1)
       reconnect();
   }));
+  client1.enableTrace();
 
   client1.on('data', (d) => {
     console.log('data1', d.toString());
