@@ -50,8 +50,8 @@ function createServer() {
   }, function(c) {
     serverLog.push(id);
     // XXX triggers close_notify before NewSessionTicket bug
-    // c.end();
-    c.end('x');
+    c.end();
+    // c.end('x');
 
     counter++;
 
@@ -137,7 +137,7 @@ function start(callback) {
     });
     s.on('data', () => {
       console.log('client %d: on data, do .end()', s.localPort);
-      s.end();
+      //s.end();
     });
     s.on('close', function() {
       console.log('client %d: on close', localPort);
