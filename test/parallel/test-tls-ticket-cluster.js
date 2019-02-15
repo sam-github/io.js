@@ -40,13 +40,19 @@ if (cluster.isMaster) {
   let workerPort = null;
 
   function shoot() {
-    console.error('[master] connecting', workerPort);
+    console.error('[master] connecting', workerPort, 'have session?', !!lastSession);
     const c = tls.connect(workerPort, {
       session: lastSession,
       rejectUnauthorized: false
     }, () => {
+      console.log('[master] on secureConnect');
       c.end();
-
+    }).on('close', () => {
+      console.log('[master] on close');
+      // Wait for close to shoot off another connection. We don't want to shoot
+      // until a new session is allocated, if one will be. The new session is
+      // not guaranteed on secureConnect (it depends on TLS1.2 vs TLS1.3), but
+      // it is guaranteed to happen before the connection is closed.
       if (++reqCount === expectedReqCount) {
         Object.keys(cluster.workers).forEach(function(id) {
           cluster.workers[id].send('die');
@@ -55,8 +61,12 @@ if (cluster.isMaster) {
         shoot();
       }
     }).once('session', (session) => {
+      console.log('client on session');
+      assert(!lastSession);
       lastSession = session;
     });
+
+    c.resume(); // XXX see close_notify comment in server
   }
 
   function fork() {
@@ -93,12 +103,16 @@ const cert = fixtures.readSync('agent.crt');
 const options = { key, cert };
 
 const server = tls.createServer(options, (c) => {
+  console.error('[worker] connection reused?', c.isSessionReused());
   if (c.isSessionReused()) {
     process.send({ msg: 'reused' });
   } else {
     process.send({ msg: 'not-reused' });
   }
-  c.end();
+  // XXX used to just .end(), but that means client gets close_notify
+  // before NewSessionTicket. Send data until that problem is solved.
+  // c.end();
+  c.end('x');
 });
 
 server.listen(0, () => {

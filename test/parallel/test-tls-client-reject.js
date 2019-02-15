@@ -34,7 +34,10 @@ const options = {
 };
 
 const server = tls.createServer(options, function(socket) {
+  console.log('server on secureConnection');
   socket.pipe(socket);
+  // Pipe already ends... but leaving this here tests .end() after .end().
+  // XXX(sam) is that good, or is it bad?
   socket.on('end', () => socket.end());
 }).listen(0, common.mustCall(function() {
   unauthorized();
@@ -47,12 +50,20 @@ function unauthorized() {
     servername: 'localhost',
     rejectUnauthorized: false
   }, common.mustCall(function() {
-    console.log('... unauthorized');
+    let _data;
+    console.log('... unauthorized', socket.getProtocol());
     assert(!socket.authorized);
     socket.on('data', common.mustCall((data) => {
       assert.strictEqual(data.toString(), 'ok');
+      _data = data;
+    }));
+    socket.on('end', common.mustCall(() => {
+      assert(_data, 'data failed to echo!');
     }));
     socket.on('end', () => rejectUnauthorized());
+  }));
+  socket.once('session', common.mustCall(() => {
+    console.log('client on session');
   }));
   socket.on('error', common.mustNotCall());
   socket.end('ok');
@@ -65,7 +76,7 @@ function rejectUnauthorized() {
   }, common.mustNotCall());
   socket.on('data', common.mustNotCall());
   socket.on('error', common.mustCall(function(err) {
-    console.log('... rejected:', err);
+    console.log('... rejected:', err.code, err.message);
     authorized();
   }));
   socket.end('ng');

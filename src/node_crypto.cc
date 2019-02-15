@@ -347,9 +347,14 @@ void SecureContext::Initialize(Environment* env, Local<Object> target) {
   env->SetProtoMethod(t, "addCACert", AddCACert);
   env->SetProtoMethod(t, "addCRL", AddCRL);
   env->SetProtoMethod(t, "addRootCerts", AddRootCerts);
+  env->SetProtoMethod(t, "setCipherSuites", SetCipherSuites);
   env->SetProtoMethod(t, "setCiphers", SetCiphers);
   env->SetProtoMethod(t, "setECDHCurve", SetECDHCurve);
   env->SetProtoMethod(t, "setDHParam", SetDHParam);
+  env->SetProtoMethod(t, "setMaxProto", SetMaxProto);
+  env->SetProtoMethod(t, "setMinProto", SetMinProto);
+  env->SetProtoMethod(t, "getMaxProto", GetMaxProto);
+  env->SetProtoMethod(t, "getMinProto", GetMinProto);
   env->SetProtoMethod(t, "setOptions", SetOptions);
   env->SetProtoMethod(t, "setSessionIdContext", SetSessionIdContext);
   env->SetProtoMethod(t, "setSessionTimeout", SetSessionTimeout);
@@ -401,6 +406,8 @@ void SecureContext::New(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+const int MAX_SUPPORTED_VERSION = TLS1_2_VERSION;
+
 void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
@@ -414,13 +421,16 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
   int max_version = args[2].As<Int32>()->Value();
   const SSL_METHOD* method = TLS_method();
 
+  if (max_version == 0)
+    max_version = MAX_SUPPORTED_VERSION;
+
   if (args[0]->IsString()) {
     const node::Utf8Value sslmethod(env->isolate(), args[0]);
 
     // Note that SSLv2 and SSLv3 are disallowed but SSLv23_method and friends
     // are still accepted.  They are OpenSSL's way of saying that all known
-    // protocols are supported unless explicitly disabled (which we do below
-    // for SSLv2 and SSLv3.)
+    // protocols below TLS 1.3 are supported unless explicitly disabled (which
+    // we do below for SSLv2 and SSLv3.)
     if (strcmp(*sslmethod, "SSLv2_method") == 0) {
       THROW_ERR_TLS_INVALID_PROTOCOL_METHOD(env, "SSLv2 methods disabled");
       return;
@@ -440,21 +450,23 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
       THROW_ERR_TLS_INVALID_PROTOCOL_METHOD(env, "SSLv3 methods disabled");
       return;
     } else if (strcmp(*sslmethod, "SSLv23_method") == 0) {
-      // noop
+      max_version = TLS1_2_VERSION;
     } else if (strcmp(*sslmethod, "SSLv23_server_method") == 0) {
+      max_version = TLS1_2_VERSION;
       method = TLS_server_method();
     } else if (strcmp(*sslmethod, "SSLv23_client_method") == 0) {
+      max_version = TLS1_2_VERSION;
       method = TLS_client_method();
     } else if (strcmp(*sslmethod, "TLS_method") == 0) {
       min_version = 0;
-      max_version = 0;
+      max_version = MAX_SUPPORTED_VERSION;
     } else if (strcmp(*sslmethod, "TLS_server_method") == 0) {
       min_version = 0;
-      max_version = 0;
+      max_version = MAX_SUPPORTED_VERSION;
       method = TLS_server_method();
     } else if (strcmp(*sslmethod, "TLS_client_method") == 0) {
       min_version = 0;
-      max_version = 0;
+      max_version = MAX_SUPPORTED_VERSION;
       method = TLS_client_method();
     } else if (strcmp(*sslmethod, "TLSv1_method") == 0) {
       min_version = TLS1_VERSION;
@@ -518,12 +530,6 @@ void SecureContext::Init(const FunctionCallbackInfo<Value>& args) {
                                  SSL_SESS_CACHE_NO_AUTO_CLEAR);
 
   SSL_CTX_set_min_proto_version(sc->ctx_.get(), min_version);
-
-  if (max_version == 0) {
-    // Selecting some secureProtocol methods allows the TLS version to be "any
-    // supported", but we don't support TLSv1.3, even if OpenSSL does.
-    max_version = TLS1_2_VERSION;
-  }
   SSL_CTX_set_max_proto_version(sc->ctx_.get(), max_version);
 
   // OpenSSL 1.1.0 changed the ticket key size, but the OpenSSL 1.0.x size was
@@ -943,40 +949,48 @@ void SecureContext::AddRootCerts(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+#if 1
+#define fprintf(...)
+#endif
+
+void SecureContext::SetCipherSuites(const FunctionCallbackInfo<Value>& args) {
+  // If TLSv1.3 is not supported, silently ignore its cipher suites.
+#ifdef TLS1_3_VERSION
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+  Environment* env = sc->env();
+  ClearErrorOnReturn clear_error_on_return;
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsString());
+
+  const node::Utf8Value ciphers(args.GetIsolate(), args[0]);
+  if (!SSL_CTX_set_ciphersuites(sc->ctx_.get(), *ciphers)) {
+    unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
+    if (!err) {
+      // XXX confirm failure with no error is possible
+      return env->ThrowError("Failed to set ciphers");
+    }
+    return ThrowCryptoError(env, err);
+  }
+#endif
+}
+
+
 void SecureContext::SetCiphers(const FunctionCallbackInfo<Value>& args) {
   SecureContext* sc;
   ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
   Environment* env = sc->env();
   ClearErrorOnReturn clear_error_on_return;
 
-  if (args.Length() != 1) {
-    return THROW_ERR_MISSING_ARGS(env, "Ciphers argument is mandatory");
-  }
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsString());
 
-  THROW_AND_RETURN_IF_NOT_STRING(env, args[0], "Ciphers");
-
-  // Note: set_ciphersuites() is for TLSv1.3 and was introduced in openssl
-  // 1.1.1, set_cipher_list() is for TLSv1.2 and earlier.
-  //
-  // In openssl 1.1.0, set_cipher_list() would error if it resulted in no
-  // TLSv1.2 (and earlier) cipher suites, and there is no TLSv1.3 support.
-  //
-  // In openssl 1.1.1, set_cipher_list() will not error if it results in no
-  // TLSv1.2 cipher suites if there are any TLSv1.3 cipher suites, which there
-  // are by default. There will be an error later, during the handshake, but
-  // that results in an async error event, rather than a sync error thrown,
-  // which is a semver-major change for the tls API.
-  //
-  // Since we don't currently support TLSv1.3, work around this by removing the
-  // TLSv1.3 cipher suites, so we get backwards compatible synchronous errors.
   const node::Utf8Value ciphers(args.GetIsolate(), args[0]);
-  if (
-#ifdef TLS1_3_VERSION
-      !SSL_CTX_set_ciphersuites(sc->ctx_.get(), "") ||
-#endif
-      !SSL_CTX_set_cipher_list(sc->ctx_.get(), *ciphers)) {
+  if (!SSL_CTX_set_cipher_list(sc->ctx_.get(), *ciphers)) {
     unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
     if (!err) {
+      // XXX confirm failure with no error is possible
       return env->ThrowError("Failed to set ciphers");
     }
     return ThrowCryptoError(env, err);
@@ -1044,6 +1058,54 @@ void SecureContext::SetDHParam(const FunctionCallbackInfo<Value>& args) {
 
   if (!r)
     return env->ThrowTypeError("Error setting temp DH parameter");
+}
+
+
+void SecureContext::SetMinProto(const FunctionCallbackInfo<Value>& args) {
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsInt32());
+
+  int version = args[0].As<Int32>()->Value();
+
+  CHECK(SSL_CTX_set_min_proto_version(sc->ctx_.get(), version));
+}
+
+
+void SecureContext::SetMaxProto(const FunctionCallbackInfo<Value>& args) {
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsInt32());
+
+  int version = args[0].As<Int32>()->Value();
+
+  CHECK(SSL_CTX_set_max_proto_version(sc->ctx_.get(), version));
+}
+
+
+void SecureContext::GetMinProto(const FunctionCallbackInfo<Value>& args) {
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+
+  CHECK_EQ(args.Length(), 0);
+
+  long version = SSL_CTX_get_min_proto_version(sc->ctx_.get());
+  args.GetReturnValue().Set(static_cast<uint32_t>(version));
+}
+
+
+void SecureContext::GetMaxProto(const FunctionCallbackInfo<Value>& args) {
+  SecureContext* sc;
+  ASSIGN_OR_RETURN_UNWRAP(&sc, args.Holder());
+
+  CHECK_EQ(args.Length(), 0);
+
+  long version = SSL_CTX_get_max_proto_version(sc->ctx_.get());
+  args.GetReturnValue().Set(static_cast<uint32_t>(version));
 }
 
 
@@ -1265,6 +1327,7 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
   Environment* env = wrap->env();
 
+  // XXX(sam) Move type and len check to js, and CHECK() in C++.
   if (args.Length() < 1) {
     return THROW_ERR_MISSING_ARGS(env, "Ticket keys argument is mandatory");
   }
@@ -1279,6 +1342,13 @@ void SecureContext::SetTicketKeys(const FunctionCallbackInfo<Value>& args) {
   memcpy(wrap->ticket_key_name_, Buffer::Data(args[0]), 16);
   memcpy(wrap->ticket_key_hmac_, Buffer::Data(args[0]) + 16, 16);
   memcpy(wrap->ticket_key_aes_, Buffer::Data(args[0]) + 32, 16);
+
+  fprintf(stderr, "SetTicketKeys %02x%02x%02x%02x\n",
+      wrap->ticket_key_name_[0],
+      wrap->ticket_key_name_[1],
+      wrap->ticket_key_name_[2],
+      wrap->ticket_key_name_[3]
+      );
 
   args.GetReturnValue().Set(true);
 #endif  // !def(OPENSSL_NO_TLSEXT) && def(SSL_CTX_get_tlsext_ticket_keys)
@@ -1399,6 +1469,9 @@ int SecureContext::TicketCompatibilityCallback(SSL* ssl,
 
   if (enc) {
     memcpy(name, sc->ticket_key_name_, sizeof(sc->ticket_key_name_));
+    fprintf(stderr, "TicketKeyCallback() issue name %02x%02x%02x%02x\n",
+        name[0], name[1], name[2], name[3]);
+
     if (RAND_bytes(iv, 16) <= 0 ||
         EVP_EncryptInit_ex(ectx, EVP_aes_128_cbc(), nullptr,
                            sc->ticket_key_aes_, iv) <= 0 ||
@@ -1408,6 +1481,11 @@ int SecureContext::TicketCompatibilityCallback(SSL* ssl,
     }
     return 1;
   }
+
+  fprintf(stderr, "TicketKeyCallback() reuse name %02x%02x%02x%02x with %02x%02x%02x%02x, match? %d\n",
+      name[0], name[1], name[2], name[3],
+      sc->ticket_key_name_[0], sc->ticket_key_name_[1], sc->ticket_key_name_[2], sc->ticket_key_name_[3],
+      0 == memcmp(name, sc->ticket_key_name_, sizeof(sc->ticket_key_name_)));
 
   if (memcmp(name, sc->ticket_key_name_, sizeof(sc->ticket_key_name_)) != 0) {
     // The ticket key name does not match. Discard the ticket.
@@ -1517,6 +1595,9 @@ int SSLWrap<Base>::NewSessionCallback(SSL* s, SSL_SESSION* sess) {
   Environment* env = w->ssl_env();
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
+
+//fprintf(stderr, "%s SSLWrap::NewSessionCallback() enabled? %d\n",
+//    w->is_server() ? "server" : "client", w->session_callbacks_);
 
   if (!w->session_callbacks_)
     return 0;
@@ -2121,6 +2202,7 @@ void SSLWrap<Base>::LoadSession(const FunctionCallbackInfo<Value>& args) {
   Base* w;
   ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
 
+  // XXX(sam) check arg length and types in js, and CHECK in c++
   if (args.Length() >= 1 && Buffer::HasInstance(args[0])) {
     ssize_t slen = Buffer::Length(args[0]);
     char* sbuf = Buffer::Data(args[0]);
@@ -2251,6 +2333,7 @@ void SSLWrap<Base>::GetEphemeralKeyInfo(
       case EVP_PKEY_EC:
       // TODO(shigeki) Change this to EVP_PKEY_X25519 and add EVP_PKEY_X448
       // after upgrading to 1.1.1.
+      // XXX figure out what shigeki means, and do it
       case NID_X25519:
         {
           const char* curve_name;
@@ -2272,9 +2355,12 @@ void SSLWrap<Base>::GetEphemeralKeyInfo(
                                  EVP_PKEY_bits(key))).FromJust();
         }
         break;
+      default:
+        UNREACHABLE(); // XXX @shigeki - true? Only EC and DH for ephemeral?
     }
     EVP_PKEY_free(key);
   }
+  // XXX(sam) semver-major: else return ThrowCryptoError(env, ERR_get_error())
 
   return args.GetReturnValue().Set(info);
 }
@@ -2490,7 +2576,10 @@ int SSLWrap<Base>::TLSExtStatusCallback(SSL* s, void* arg) {
 
     w->MakeCallback(env->onocspresponse_string(), 1, &arg);
 
-    // Somehow, client is expecting different return value here
+    // No async acceptance is possible, so always return 1 to accept the
+    // response.  The listener for 'OCSPResponse' event has no control over
+    // return value, but it can .destroy() the connection if the response is not
+    // acceptable.
     return 1;
   } else {
     // Outgoing response
@@ -2522,6 +2611,8 @@ void SSLWrap<Base>::WaitForCertCb(CertCb cb, void* arg) {
 }
 
 
+// XXX TLSv1.3, ensure this is called at the right time, when servername and
+// OCSP extensions have been received
 template <class Base>
 int SSLWrap<Base>::SSLCertCallback(SSL* s, void* arg) {
   Base* w = static_cast<Base*>(SSL_get_app_data(s));
@@ -2533,6 +2624,8 @@ int SSLWrap<Base>::SSLCertCallback(SSL* s, void* arg) {
     return 1;
 
   if (w->cert_cb_running_)
+    // Not an error. Suspend handshake with SSL_ERROR_WANT_X509_LOOKUP, and
+    // handshake will continue after certcb is done.
     return -1;
 
   Environment* env = w->env();
@@ -2608,6 +2701,8 @@ void SSLWrap<Base>::CertCbDone(const FunctionCallbackInfo<Value>& args) {
     if (rv)
       rv = w->SetCACerts(sc);
     if (!rv) {
+      // XXX(sam) not clear why sometimes we throw error, and sometimes we call
+      // onerror(). Both cause .destroy(), but onerror does a bit more.
       unsigned long err = ERR_get_error();  // NOLINT(runtime/int)
       if (!err)
         return env->ThrowError("CertCbDone");
@@ -2637,6 +2732,9 @@ void SSLWrap<Base>::CertCbDone(const FunctionCallbackInfo<Value>& args) {
 
 template <class Base>
 void SSLWrap<Base>::DestroySSL() {
+  fprintf(stderr, "%s SSLWrap::DestroySSL() ssl? %d\n",
+      is_server() ? "server" : "client", !!ssl_);
+
   if (!ssl_)
     return;
 
@@ -6174,6 +6272,10 @@ void TimingSafeEqual(const FunctionCallbackInfo<Value>& args) {
 
   return args.GetReturnValue().Set(CRYPTO_memcmp(buf1, buf2, buf_length) == 0);
 }
+
+#ifdef fprintf
+#undef fprintf
+#endif
 
 void InitCryptoOnce() {
   SSL_load_error_strings();
